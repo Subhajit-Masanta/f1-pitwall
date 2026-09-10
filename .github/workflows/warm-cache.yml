@@ -1,0 +1,55 @@
+name: Warm race cache
+
+# Auto-update after race weekends. F1 races are almost always Sunday, so we run
+# Monday morning UTC to pick up the new round, plus a manual trigger.
+on:
+  schedule:
+    - cron: '17 6 * * 1'        # Mondays 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      year:
+        description: 'Season (blank = current)'
+        required: false
+      recent:
+        description: 'How many recent completed rounds to warm'
+        required: false
+        default: '2'
+      sessions:
+        description: 'Session codes, space separated (e.g. "Q R")'
+        required: false
+        default: 'Q'
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      # FastF1's raw download cache — reused across runs so repeat warms are fast.
+      - name: Restore FastF1 cache
+        uses: actions/cache@v4
+        with:
+          path: backend/cache
+          key: fastf1-${{ github.run_id }}
+          restore-keys: fastf1-
+
+      - name: Warm MongoDB cache
+        working-directory: backend
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/warm_cache.py \
+            ${{ github.event.inputs.year && format('--year {0}', github.event.inputs.year) || '' }} \
+            --recent ${{ github.event.inputs.recent || '2' }} \
+            --sessions ${{ github.event.inputs.sessions || 'Q' }}

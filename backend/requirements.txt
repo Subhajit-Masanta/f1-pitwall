@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+fastf1==3.8.3
+pandas==2.2.3
+numpy==1.26.4
+pymongo==4.10.1
+python-dotenv==1.0.1

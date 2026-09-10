@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+*/.env
+!*/.env.example
+
+# FastF1 cache (large downloaded data)
+cache/
+*/cache/
+
+# Node / Vite
+node_modules/
+*/node_modules/
+dist/
+.vite/
+*/.vite/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Data dumps
+*.csv
+
+# Duplicate / reference trees (not part of the deployable app)
+F1_V1/
+f1-race-replay-main/
