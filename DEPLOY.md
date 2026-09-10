@@ -116,3 +116,17 @@ curl https://<your-api>/races/2026      # calendar
 
 If `cache.connected` is `false`, the API still works — every request is just slow.
 Check `MONGODB_URI` and that Atlas network access allows `0.0.0.0/0`.
+
+---
+
+## Troubleshooting
+
+**Build hangs on "Preparing metadata (pyproject.toml): still running" (pandas/numpy)**
+The host picked a Python version with no prebuilt wheels (3.13/3.14) and is
+compiling from source. `backend/.python-version` (`3.12.8`) and
+`backend/runtime.txt` pin it. If the host ignores both, set an env var
+`PYTHON_VERSION=3.12.8` in the dashboard. Or switch the service to **Docker** —
+`backend/Dockerfile` already uses `python:3.12-slim` and sidesteps the guessing.
+
+**Render "Root Directory"** must be `backend` so it finds `requirements.txt`
+and the Python-version files.
