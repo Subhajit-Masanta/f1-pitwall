@@ -19,24 +19,34 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
     const [selectedRaceId, setSelectedRaceId] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [waking, setWaking] = useState(false);
 
     useEffect(() => {
         setSelectedRaceId('');
         onSelectRace(null);
         setLoading(true);
         setError(null);
+        setWaking(false);
+        const wakeTimer = setTimeout(() => setWaking(true), 4000);
 
         (async () => {
             try {
                 const data = await raceService.getCalendar(year);
+                if (data.error) throw new Error(data.error);
                 setRaces(data);
             } catch (err) {
                 console.error('Failed to load races', err);
-                setError(err.message);
+                setError(
+                    err.code === 'ECONNABORTED' || !err.response
+                        ? 'Server is waking up or unreachable — retry in a moment.'
+                        : (err.message || 'Failed to load the calendar.')
+                );
             } finally {
+                clearTimeout(wakeTimer);
                 setLoading(false);
             }
         })();
+        return () => clearTimeout(wakeTimer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [year]);
 
@@ -65,7 +75,11 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
                 style={{ ...selectStyle, minWidth: 260 }}
                 disabled={loading || !!error}
             >
-                <option value="">{loading ? 'Loading calendar…' : '— Select a Grand Prix —'}</option>
+                <option value="">
+                    {loading
+                        ? (waking ? 'Waking up the server…' : 'Loading calendar…')
+                        : '— Select a Grand Prix —'}
+                </option>
                 {races.map((race) => (
                     <option key={race.round} value={race.round}>
                         R{race.round} · {race.name}
@@ -81,8 +95,8 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
             )}
 
             {error && (
-                <span style={{ color: F1.red, fontSize: 11 }}>
-                    {error} — is the backend running?
+                <span style={{ color: F1.red, fontSize: 11, letterSpacing: 0.5 }}>
+                    {error}
                 </span>
             )}
         </div>

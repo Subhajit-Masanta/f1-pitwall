@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { raceService } from '../services/raceService';
 import { F1, MONO } from '../theme';
+import StageMessage from './StageMessage';
 
 const Cell = ({ children, w, align = 'left', color = F1.text, mono = false, dim = false }) => (
     <div style={{
@@ -20,34 +21,53 @@ const Cell = ({ children, w, align = 'left', color = F1.text, mono = false, dim 
     </div>
 );
 
+const friendly = (e) => {
+    if (e?.code === 'ECONNABORTED') return 'The server took too long — it may be waking up. Try again.';
+    if (e && !e.response) return 'Can’t reach the server. Check your connection.';
+    return e?.message || 'Something went wrong.';
+};
+
 const RaceResults = ({ year, round, raceName }) => {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [tick, setTick] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
         setLoading(true); setError(null); setData(null);
         raceService.getResults(year, round, 'R')
-            .then((d) => { if (!cancelled) { d.error ? setError(d.error) : setData(d); } })
-            .catch((e) => { if (!cancelled) setError(e.message); })
+            .then((d) => {
+                if (cancelled) return;
+                if (d.error || !d.standings?.length) {
+                    setError(d.error || 'No classification available for this race yet.');
+                } else {
+                    setData(d);
+                }
+            })
+            .catch((e) => { if (!cancelled) setError(friendly(e)); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [year, round]);
+    }, [year, round, tick]);
 
     if (loading) {
-        return <div style={pad}><span style={{ color: F1.dim, fontSize: 12, letterSpacing: 3 }}>LOADING CLASSIFICATION</span></div>;
+        return <StageMessage variant="loading" title={raceName} />;
     }
     if (error) {
-        return <div style={pad}><span style={{ color: F1.red, fontSize: 12 }}>{error}</span></div>;
-    }
-    if (!data?.standings?.length) {
-        return <div style={pad}><span style={{ color: F1.dim, fontSize: 12 }}>No classification available for this race yet.</span></div>;
+        return (
+            <StageMessage
+                variant="error"
+                title={raceName}
+                message={error}
+                onRetry={() => setTick((t) => t + 1)}
+            />
+        );
     }
 
     return (
         <div style={{ border: `1px solid ${F1.line}`, background: F1.bg }}>
             {/* header */}
+
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 14, padding: '16px 22px',
                 borderBottom: `1px solid ${F1.line}`,
@@ -64,9 +84,10 @@ const RaceResults = ({ year, round, raceName }) => {
                 </span>
             </div>
 
+            <div style={{ overflowX: 'auto' }}>
             {/* column labels */}
             <div style={{
-                display: 'flex', gap: 14, padding: '9px 22px',
+                display: 'flex', gap: 14, padding: '9px 22px', minWidth: 640,
                 fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: F1.dim,
                 borderBottom: `1px solid ${F1.hair}`,
             }}>
@@ -86,7 +107,7 @@ const RaceResults = ({ year, round, raceName }) => {
                 const gainColor = gain > 0 ? F1.drs : gain < 0 ? F1.red : F1.dim;
                 return (
                     <div key={s.number} style={{
-                        display: 'flex', gap: 14, alignItems: 'center',
+                        display: 'flex', gap: 14, alignItems: 'center', minWidth: 640,
                         padding: '9px 22px', fontSize: 12,
                         borderBottom: `1px solid ${F1.hair}`,
                     }}>
@@ -110,6 +131,7 @@ const RaceResults = ({ year, round, raceName }) => {
                     </div>
                 );
             })}
+            </div>
 
             {/* what's next */}
             <div style={{
@@ -122,10 +144,6 @@ const RaceResults = ({ year, round, raceName }) => {
             </div>
         </div>
     );
-};
-
-const pad = {
-    border: `1px solid ${F1.line}`, padding: '40px 22px', textAlign: 'center',
 };
 
 export default RaceResults;

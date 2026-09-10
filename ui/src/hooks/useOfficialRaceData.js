@@ -9,6 +9,19 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { raceService } from '../services/raceService';
 
+/** Turn an axios failure into something a person can read. */
+const friendlyError = (err) => {
+    if (err?.code === 'ECONNABORTED') {
+        return 'The server took too long to respond. It may be waking up from sleep — give it a moment and try again.';
+    }
+    if (err && !err.response) {
+        return 'Can’t reach the server. Check your connection and try again.';
+    }
+    const status = err?.response?.status;
+    if (status >= 500) return 'The server hit an error loading this session.';
+    return err?.message || 'Something went wrong.';
+};
+
 // x' = x·cosθ - y·sinθ ,  y' = x·sinθ + y·cosθ
 const applyRotation = (x, y, angleDeg) => {
     const a = (angleDeg * Math.PI) / 180;
@@ -24,6 +37,9 @@ export const useOfficialRaceData = (year, round, session) => {
     const [sectorBoundaries, setSectorBoundaries] = useState(null);
     const [officialSectorTimes, setOfficialSectorTimes] = useState(null);
     const [driver, setDriver] = useState(null);
+    const [error, setError] = useState(null);        // track-load failure/empty
+    const [replayError, setReplayError] = useState(null);  // telemetry-load failure/empty
+    const [reloadKey, setReloadKey] = useState(0);
 
     // 1. Fetch the track outline and pre-rotate it. The backend now also gives us
     //    the sector-boundary distances, so the coloured map works before playback.
@@ -35,6 +51,8 @@ export const useOfficialRaceData = (year, round, session) => {
         setSectorBoundaries(null);
         setOfficialSectorTimes(null);
         setDriver(null);
+        setError(null);
+        setReplayError(null);
         setLoading(true);
 
         let cancelled = false;
@@ -42,6 +60,10 @@ export const useOfficialRaceData = (year, round, session) => {
             try {
                 const data = await raceService.getTrackData(year, round, session || 'R');
                 if (cancelled) return;
+                if (data.error || !(data.track_points || []).length) {
+                    setError(data.error || 'No track data available for this session.');
+                    return;
+                }
 
                 const angle = data.rotation || 0;
                 data.track_points = (data.track_points || []).map((p) => {
@@ -63,21 +85,28 @@ export const useOfficialRaceData = (year, round, session) => {
                 }
             } catch (err) {
                 console.error('Error loading track:', err);
+                if (!cancelled) setError(friendlyError(err));
             } finally {
                 if (!cancelled) setLoading(false);
             }
         })();
 
         return () => { cancelled = true; };
-    }, [year, round, session]);
+    }, [year, round, session, reloadKey]);
+
+    const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
     // 2. Fetch the fastest-lap telemetry (on demand) and pre-rotate it.
     const loadReplay = useCallback(async () => {
-        if (telemetry) return;
+        if (telemetry) return true;
+        setReplayError(null);
         try {
             // 'fastest' = whoever set the quickest lap of this session.
             const data = await raceService.getTelemetry(year, round, session || 'R', 'fastest');
-            if (!data.telemetry) return;
+            if (data.error || !data.telemetry) {
+                setReplayError(data.error || 'This session has no lap telemetry to replay.');
+                return false;
+            }
             setDriver({
                 code: data.driver_code,
                 name: data.driver_name,
@@ -96,8 +125,11 @@ export const useOfficialRaceData = (year, round, session) => {
             // to the telemetry call's own analysis.
             if (!sectorBoundaries && data.sector_boundaries) setSectorBoundaries(data.sector_boundaries);
             if (data.sector_times) setOfficialSectorTimes(data.sector_times);
+            return true;
         } catch (err) {
             console.error('Failed to load telemetry', err);
+            setReplayError(friendlyError(err));
+            return false;
         }
     }, [telemetry, trackData, sectorBoundaries, year, round, session]);
 
@@ -135,8 +167,6 @@ export const useOfficialRaceData = (year, round, session) => {
             }
             return bi;
         };
-        const nearest = (dist) => pts[idxNearest(dist)];
-
         // Unit tangent at a point index (for perpendicular tick marks).
         const tangentAt = (i) => {
             const a = pts[Math.max(0, i - 2)];
@@ -196,7 +226,10 @@ export const useOfficialRaceData = (year, round, session) => {
         mapLayout,
         telemetry,
         loading,
+        error,
+        reload,
         loadReplay,
+        replayError,
         sectorBoundaries,
         officialSectorTimes,
         driver,

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useIsNarrow } from './hooks/useResponsive';
 import { ChevronLeft } from 'lucide-react';
 
 import Landing from './components/Landing';
@@ -17,13 +18,14 @@ function App() {
   const [mode, setMode] = useState(null);          // null | 'quali' | 'race'
   const [selectedRace, setSelectedRace] = useState(null);
   const [year, setYear] = useState(2026);
+  const narrow = useIsNarrow(720);
 
   const leave = () => { setMode(null); setSelectedRace(null); };
 
   return (
     <div style={{
       background: F1.bg, minHeight: '100vh', color: F1.text,
-      padding: '26px 30px 60px',
+      padding: narrow ? '18px 14px 48px' : '26px 30px 60px',
     }}>
       {import.meta.env.DEV && <FpsMeter />}
 

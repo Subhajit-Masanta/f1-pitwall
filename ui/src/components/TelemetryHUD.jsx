@@ -17,12 +17,12 @@ const Label = ({ children }) => (
     </div>
 );
 
-const Pedal = ({ label, color, barRef }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 26, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: F1.dim }}>
+const Pedal = ({ label, color, barRef, w }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 24, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: F1.dim }}>
             {label}
         </span>
-        <div style={{ position: 'relative', width: 176, height: 4, background: F1.line }}>
+        <div style={{ position: 'relative', width: w, height: 4, background: F1.line }}>
             <div ref={barRef} style={{
                 position: 'absolute', inset: 0, width: '0%', background: color,
             }} />
@@ -30,13 +30,14 @@ const Pedal = ({ label, color, barRef }) => (
     </div>
 );
 
-const TelemetryHUD = forwardRef((_props, ref) => {
+const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
     const speedRef = useRef(null);
     const gearRef = useRef(null);
     const thrRef = useRef(null);
     const brkRef = useRef(null);
     const drsRef = useRef(null);
     const rpmRefs = useRef([]);
+    const segCountRef = useRef(RPM_SEGMENTS);
 
     useImperativeHandle(ref, () => ({
         update(fr) {
@@ -52,12 +53,13 @@ const TelemetryHUD = forwardRef((_props, ref) => {
             if (thrRef.current) thrRef.current.style.width = thr.toFixed(0) + '%';
             if (brkRef.current) brkRef.current.style.width = brk.toFixed(0) + '%';
 
-            const lit = Math.round((Math.min(fr.rpm, MAX_RPM) / MAX_RPM) * RPM_SEGMENTS);
-            for (let i = 0; i < RPM_SEGMENTS; i++) {
+            const n = segCountRef.current;
+            const lit = Math.round((Math.min(fr.rpm, MAX_RPM) / MAX_RPM) * n);
+            for (let i = 0; i < n; i++) {
                 const seg = rpmRefs.current[i];
                 if (!seg) continue;
                 seg.style.background = i < lit
-                    ? (i < 11 ? F1.text : i < 15 ? F1.red : F1.purple)
+                    ? (i < n * 0.62 ? F1.text : i < n * 0.85 ? F1.red : F1.purple)
                     : F1.line;
             }
 
@@ -70,52 +72,53 @@ const TelemetryHUD = forwardRef((_props, ref) => {
         },
     }), []);
 
+    const bigNum = narrow ? 30 : 40;
+    const pedalW = narrow ? 96 : 176;
+    const segCount = narrow ? 12 : RPM_SEGMENTS;
+    segCountRef.current = segCount;
+
     return (
         <div style={{
             position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 12,
-            display: 'flex', alignItems: 'center', gap: 40,
-            padding: '16px 26px',
+            display: 'flex', alignItems: 'center',
+            gap: narrow ? 16 : 40, flexWrap: narrow ? 'wrap' : 'nowrap',
+            padding: narrow ? '12px 14px 16px' : '16px 26px',
             borderTop: `1px solid ${F1.line}`,
             background: 'linear-gradient(180deg, rgba(11,11,15,0) 0%, rgba(11,11,15,0.96) 42%)',
         }}>
-            {/* speed */}
-            <div style={{ minWidth: 108 }}>
+            <div style={{ minWidth: narrow ? 88 : 108 }}>
                 <Label>SPEED</Label>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span ref={speedRef} style={{
-                        fontFamily: MONO, fontSize: 40, fontWeight: 700, lineHeight: 1,
+                        fontFamily: MONO, fontSize: bigNum, fontWeight: 700, lineHeight: 1,
                         color: F1.text, fontVariantNumeric: 'tabular-nums',
                     }}>0</span>
                     <span style={{ fontSize: 10, color: F1.dim, letterSpacing: 1 }}>KM/H</span>
                 </div>
             </div>
 
-            {/* gear */}
-            <div style={{ minWidth: 46 }}>
+            <div style={{ minWidth: 40 }}>
                 <Label>GEAR</Label>
                 <span ref={gearRef} style={{
-                    fontFamily: MONO, fontSize: 40, fontWeight: 700, lineHeight: 1, color: F1.text,
+                    fontFamily: MONO, fontSize: bigNum, fontWeight: 700, lineHeight: 1, color: F1.text,
                 }}>N</span>
             </div>
 
-            {/* pedals */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                <Pedal label="THR" color={F1.green} barRef={thrRef} />
-                <Pedal label="BRK" color={F1.red} barRef={brkRef} />
+                <Pedal label="THR" color={F1.green} barRef={thrRef} w={pedalW} />
+                <Pedal label="BRK" color={F1.red} barRef={brkRef} w={pedalW} />
             </div>
 
-            {/* rpm */}
-            <div style={{ marginLeft: 'auto' }}>
+            <div style={{ marginLeft: narrow ? 0 : 'auto' }}>
                 <Label>RPM</Label>
                 <div style={{ display: 'flex', gap: 2, marginTop: 6 }}>
-                    {Array.from({ length: RPM_SEGMENTS }).map((_, i) => (
+                    {Array.from({ length: segCount }).map((_, i) => (
                         <div key={i} ref={(el) => { rpmRefs.current[i] = el; }}
-                            style={{ width: 7, height: 16, background: F1.line }} />
+                            style={{ width: narrow ? 6 : 7, height: narrow ? 14 : 16, background: F1.line }} />
                     ))}
                 </div>
             </div>
 
-            {/* drs */}
             <div ref={drsRef} style={{
                 padding: '6px 14px', fontSize: 12, fontWeight: 700, letterSpacing: 2,
                 border: `1px solid ${F1.line}`, color: F1.dim, background: 'transparent',
