@@ -82,13 +82,13 @@ const TrackMap = ({ year, round, session, raceName }) => {
             }}>
                 <span style={{ width: 3, height: 16, background: F1.red }} />
                 <span style={{
-                    fontSize: narrow ? 11 : 13, fontWeight: 700,
-                    letterSpacing: narrow ? 1.5 : 2.5, textTransform: 'uppercase',
+                    fontSize: narrow ? 13 : 15, fontWeight: 700,
+                    letterSpacing: narrow ? 1 : 1.8, textTransform: 'uppercase',
                 }}>
                     {raceName || trackData?.circuit}
                 </span>
                 {!narrow && (
-                    <span style={{ fontSize: 10, color: F1.dim, letterSpacing: 2 }}>
+                    <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 1.2 }}>
                         {driver
                             ? `FASTEST LAP · ${driver.code} · ${driver.team}`.toUpperCase()
                             : 'FASTEST LAP OF THE SESSION'}
@@ -122,7 +122,7 @@ const TrackMap = ({ year, round, session, raceName }) => {
                     display: 'flex', alignItems: 'center', gap: 8,
                 }}>
                     <span style={{ width: 16, height: 2, background: F1.drs }} />
-                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.8, color: F1.dim }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
                         DRS ZONE{drsCount > 1 ? `S · ${drsCount}` : ''}
                     </span>
                 </div>
@@ -138,8 +138,8 @@ const TrackMap = ({ year, round, session, raceName }) => {
             }}>
                 {replayError && (
                     <div style={{
-                        fontSize: 10, color: F1.red, letterSpacing: 0.5,
-                        maxWidth: 260, textAlign: 'center',
+                        fontSize: 12, color: F1.red, letterSpacing: 0.3,
+                        maxWidth: 300, textAlign: 'center', lineHeight: 1.5,
                     }}>
                         {replayError}
                     </div>
@@ -170,8 +170,8 @@ const TrackMap = ({ year, round, session, raceName }) => {
 const btn = {
     display: 'flex', alignItems: 'center', gap: 8,
     background: F1.red, color: '#fff', border: 'none',
-    padding: '9px 20px', cursor: 'pointer',
-    fontSize: 11, fontWeight: 700, letterSpacing: 2,
+    padding: '11px 24px', cursor: 'pointer',
+    fontSize: 12, fontWeight: 700, letterSpacing: 1.5,
 };
 
 const ghost = {

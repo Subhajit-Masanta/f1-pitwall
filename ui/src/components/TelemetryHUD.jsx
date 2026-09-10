@@ -12,17 +12,17 @@ const RPM_SEGMENTS = 18;
 const MAX_RPM = 12800;
 
 const Label = ({ children }) => (
-    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, color: F1.dim }}>
+    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, color: F1.dim, marginBottom: 3 }}>
         {children}
     </div>
 );
 
 const Pedal = ({ label, color, barRef, w }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 24, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: F1.dim }}>
+        <span style={{ width: 30, fontSize: 10, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
             {label}
         </span>
-        <div style={{ position: 'relative', width: w, height: 4, background: F1.line }}>
+        <div style={{ position: 'relative', width: w, height: 5, background: F1.line }}>
             <div ref={barRef} style={{
                 position: 'absolute', inset: 0, width: '0%', background: color,
             }} />
@@ -72,7 +72,7 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
         },
     }), []);
 
-    const bigNum = narrow ? 30 : 40;
+    const bigNum = narrow ? 32 : 44;
     const pedalW = narrow ? 96 : 176;
     const segCount = narrow ? 12 : RPM_SEGMENTS;
     segCountRef.current = segCount;
@@ -93,7 +93,7 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
                         fontFamily: MONO, fontSize: bigNum, fontWeight: 700, lineHeight: 1,
                         color: F1.text, fontVariantNumeric: 'tabular-nums',
                     }}>0</span>
-                    <span style={{ fontSize: 10, color: F1.dim, letterSpacing: 1 }}>KM/H</span>
+                    <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 0.8 }}>KM/H</span>
                 </div>
             </div>
 
@@ -120,7 +120,7 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
             </div>
 
             <div ref={drsRef} style={{
-                padding: '6px 14px', fontSize: 12, fontWeight: 700, letterSpacing: 2,
+                padding: '8px 16px', fontSize: 13, fontWeight: 700, letterSpacing: 1.8,
                 border: `1px solid ${F1.line}`, color: F1.dim, background: 'transparent',
                 transition: 'background .08s, color .08s',
             }}>

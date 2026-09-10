@@ -7,7 +7,7 @@ import RaceSelector from './components/RaceSelector';
 import TrackMap from './components/TrackMap';
 import RaceResults from './components/RaceResults';
 import FpsMeter from './components/FpsMeter';
-import { F1 } from './theme';
+import { F1, MAXW } from './theme';
 
 const MODE_LABEL = {
   quali: 'Fastest Qualifying Lap',
@@ -23,16 +23,17 @@ function App() {
   const leave = () => { setMode(null); setSelectedRace(null); };
 
   return (
-    <div style={{
-      background: F1.bg, minHeight: '100vh', color: F1.text,
-      padding: narrow ? '18px 14px 48px' : '26px 30px 60px',
-    }}>
+    <div style={{ background: F1.bg, minHeight: '100vh', color: F1.text }}>
+     <div style={{
+      maxWidth: MAXW, margin: '0 auto',
+      padding: narrow ? '20px 16px 56px' : '32px 40px 72px',
+     }}>
       {import.meta.env.DEV && <FpsMeter />}
 
-      <header style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28, flexWrap: 'wrap' }}>
         <div style={{ width: 4, height: 20, background: F1.red }} />
         <h1 style={{
-          margin: 0, fontSize: 15, fontWeight: 700, letterSpacing: 3,
+          margin: 0, fontSize: narrow ? 17 : 19, fontWeight: 700, letterSpacing: 2,
           textTransform: 'uppercase', cursor: mode ? 'pointer' : 'default',
         }} onClick={mode ? leave : undefined}>
           Pitwall
@@ -40,7 +41,7 @@ function App() {
         {mode && (
           <>
             <span style={{ color: F1.faint }}>/</span>
-            <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 2, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 12, color: F1.dim, letterSpacing: 1.5, textTransform: 'uppercase' }}>
               {MODE_LABEL[mode]}
             </span>
             <button onClick={leave} style={backBtn}>
@@ -58,15 +59,15 @@ function App() {
 
           {!selectedRace && (
             <div style={{
-              marginTop: 14, border: `1px solid ${F1.line}`, padding: '48px 22px',
-              textAlign: 'center', fontSize: 12, color: F1.dim, letterSpacing: 2,
+              marginTop: 18, border: `1px solid ${F1.line}`, padding: '56px 24px',
+              textAlign: 'center', fontSize: 13, color: F1.dim, letterSpacing: 1.5,
             }}>
               SELECT A GRAND PRIX
             </div>
           )}
 
           {selectedRace && mode === 'quali' && (
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 18 }}>
               <TrackMap
                 year={year}
                 round={selectedRace.round}
@@ -77,7 +78,7 @@ function App() {
           )}
 
           {selectedRace && mode === 'race' && (
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 18 }}>
               <RaceResults
                 year={year}
                 round={selectedRace.round}
@@ -87,6 +88,7 @@ function App() {
           )}
         </>
       )}
+     </div>
     </div>
   );
 }
@@ -94,8 +96,8 @@ function App() {
 const backBtn = {
   marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
   background: 'transparent', border: `1px solid ${F1.line}`, color: F1.dim,
-  padding: '6px 12px', cursor: 'pointer',
-  fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+  padding: '7px 13px', cursor: 'pointer',
+  fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
 };
 
 export default App;

@@ -4,10 +4,10 @@ import { Calendar, MapPin } from 'lucide-react';
 import { F1 } from '../theme';
 
 const selectStyle = {
-    padding: '8px 10px',
-    fontSize: 12,
+    padding: '9px 12px',
+    fontSize: 13,
     fontWeight: 600,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
     background: F1.bg,
     color: F1.text,
     border: `1px solid ${F1.line}`,
@@ -58,9 +58,9 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
 
     return (
         <div style={{
-            display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+            display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
         }}>
-            <Calendar color={F1.red} size={16} />
+            <Calendar color={F1.red} size={18} />
 
             <select value={year} onChange={(e) => onYearChange(parseInt(e.target.value, 10))} style={selectStyle}>
                 {Array.from(
@@ -72,7 +72,7 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
             <select
                 value={selectedRaceId}
                 onChange={handleChange}
-                style={{ ...selectStyle, minWidth: 260 }}
+                style={{ ...selectStyle, minWidth: 260, flex: '1 1 260px', maxWidth: 380 }}
                 disabled={loading || !!error}
             >
                 <option value="">
@@ -88,14 +88,14 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
             </select>
 
             {selectedRaceId && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: F1.dim, fontSize: 11, letterSpacing: 1 }}>
-                    <MapPin size={13} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: F1.dim, fontSize: 12, letterSpacing: 0.5 }}>
+                    <MapPin size={14} />
                     {races.find((r) => r.round === parseInt(selectedRaceId, 10))?.location}
                 </div>
             )}
 
             {error && (
-                <span style={{ color: F1.red, fontSize: 11, letterSpacing: 0.5 }}>
+                <span style={{ color: F1.red, fontSize: 12, letterSpacing: 0.3 }}>
                     {error}
                 </span>
             )}

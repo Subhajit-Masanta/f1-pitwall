@@ -76,8 +76,8 @@ const ErrorBody = ({ title, message, onRetry }) => (
                 style={{
                     display: 'inline-flex', alignItems: 'center', gap: 7,
                     background: 'transparent', color: F1.text,
-                    border: `1px solid ${F1.line}`, padding: '8px 16px',
-                    cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: 1.5,
+                    border: `1px solid ${F1.line}`, padding: '10px 18px',
+                    cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: 1.2,
                 }}
             >
                 <RotateCcw size={12} /> TRY AGAIN
@@ -88,7 +88,7 @@ const ErrorBody = ({ title, message, onRetry }) => (
 
 const StageMessage = ({ variant, title, message, onRetry, style }) => (
     <div style={{
-        position: 'relative', width: '100%', minHeight: 320,
+        position: 'relative', width: '100%', minHeight: 340,
         background: F1.bg, border: `1px solid ${F1.line}`,
         display: 'flex', padding: 20, fontFamily: MONO,
         ...style,

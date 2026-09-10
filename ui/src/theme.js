@@ -13,8 +13,8 @@ export const F1 = {
     hair: 'rgba(255,255,255,0.07)',
 
     text: '#FFFFFF',
-    dim: '#71717F',
-    faint: '#3E3E4A',
+    dim: '#909099',    // lifted for legibility on the near-black bg
+    faint: '#4C4C58',
 
     track: '#4C4C58',
     drs: '#00E676',
@@ -29,6 +29,9 @@ export const F1 = {
 };
 
 export const MONO = "'Chivo Mono', ui-monospace, 'SF Mono', Menlo, monospace";
+
+/** shared page width so content doesn't stretch on wide monitors */
+export const MAXW = 1200;
 
 /** 90.4 -> "1:30.400" */
 export const fmtLap = (t) => {

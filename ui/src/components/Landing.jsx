@@ -31,10 +31,10 @@ const Card = ({ mode, onPick }) => {
         <button
             onClick={() => onPick(mode.id)}
             style={{
-                flex: '1 1 320px', minWidth: 300, textAlign: 'left', cursor: 'pointer',
+                flex: '1 1 340px', minWidth: 300, textAlign: 'left', cursor: 'pointer',
                 background: 'transparent', color: 'inherit',
-                border: `1px solid ${F1.line}`, padding: '22px 24px 20px',
-                display: 'flex', flexDirection: 'column', gap: 14,
+                border: `1px solid ${F1.line}`, padding: '26px 28px 22px',
+                display: 'flex', flexDirection: 'column', gap: 16,
                 transition: 'border-color .15s, background .15s',
             }}
             onMouseEnter={(e) => {
@@ -48,31 +48,31 @@ const Card = ({ mode, onPick }) => {
         >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ width: 3, height: 13, background: F1.red }} />
-                <span style={{ fontFamily: MONO, fontSize: 11, color: F1.dim, letterSpacing: 1 }}>
+                <span style={{ fontFamily: MONO, fontSize: 13, color: F1.dim, letterSpacing: 1 }}>
                     {mode.n}
                 </span>
             </div>
 
-            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>
                 {mode.title}
             </div>
 
-            <div style={{ fontSize: 12, lineHeight: 1.7, color: F1.dim, maxWidth: 380 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.65, color: F1.dim, maxWidth: 440 }}>
                 {mode.blurb}
             </div>
 
             <div style={{
                 marginTop: 'auto', paddingTop: 12, borderTop: `1px solid ${F1.hair}`,
                 display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: 9, fontWeight: 700, letterSpacing: 2,
+                fontSize: 11, fontWeight: 700, letterSpacing: 1.2,
                 color: live ? F1.drs : F1.dim,
             }}>
                 <span style={{
                     width: 5, height: 5, borderRadius: '50%',
                     background: live ? F1.drs : F1.faint,
                 }} />
-                {live ? 'AVAILABLE' : 'RESULTS ONLY · REPLAY IN DEVELOPMENT'}
-                <ArrowRight size={13} style={{ marginLeft: 'auto', color: F1.dim }} />
+                {live ? 'AVAILABLE' : 'RESULTS ONLY · IN DEVELOPMENT'}
+                <ArrowRight size={15} style={{ marginLeft: 'auto', color: F1.dim }} />
             </div>
         </button>
     );
@@ -81,19 +81,19 @@ const Card = ({ mode, onPick }) => {
 const Landing = ({ onPick }) => (
     <div>
         <div style={{
-            fontSize: 9, fontWeight: 700, letterSpacing: 2.5, color: F1.dim,
-            paddingBottom: 12, borderBottom: `1px solid ${F1.line}`, marginBottom: 20,
+            fontSize: 11, fontWeight: 700, letterSpacing: 1.6, color: F1.dim,
+            paddingBottom: 14, borderBottom: `1px solid ${F1.line}`, marginBottom: 22,
         }}>
             SELECT MODE
         </div>
 
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {MODES.map((m) => <Card key={m.id} mode={m} onPick={onPick} />)}
         </div>
 
         <div style={{
-            marginTop: 26, paddingTop: 14, borderTop: `1px solid ${F1.hair}`,
-            fontSize: 11, color: F1.dim, letterSpacing: 0.5, lineHeight: 1.8,
+            marginTop: 28, paddingTop: 16, borderTop: `1px solid ${F1.hair}`,
+            fontSize: 13, color: F1.dim, letterSpacing: 0.3, lineHeight: 1.8,
         }}>
             Data from FastF1 · seasons <span style={{ fontFamily: MONO, color: F1.text }}>2018–2026</span>.
             {' '}Telemetry replay needs car position data, which is published from 2018 onward.

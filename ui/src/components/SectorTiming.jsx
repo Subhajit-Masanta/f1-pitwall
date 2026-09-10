@@ -27,13 +27,13 @@ const Split = ({ n, locked, active, narrow }) => (
             }} />
         )}
         <span style={{
-            fontSize: narrow ? 8 : 10, fontWeight: 700, letterSpacing: 1.5,
-            color: active ? SECTOR_COLOR[n] : F1.dim, width: narrow ? 'auto' : 18,
+            fontSize: narrow ? 10 : 11, fontWeight: 700, letterSpacing: 1.2,
+            color: active ? SECTOR_COLOR[n] : F1.dim, width: narrow ? 'auto' : 20,
         }}>
             S{n}
         </span>
         <span style={{
-            fontFamily: MONO, fontSize: narrow ? 11 : 15, fontWeight: 700,
+            fontFamily: MONO, fontSize: narrow ? 13 : 16, fontWeight: 700,
             color: locked != null ? F1.text : F1.faint,
             fontVariantNumeric: 'tabular-nums',
         }}>
@@ -65,7 +65,7 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }
                 opacity: visible ? 1 : 0.5, transition: 'opacity .25s',
             }}>
                 <div ref={clockRef} style={{
-                    fontFamily: MONO, fontSize: 18, fontWeight: 700,
+                    fontFamily: MONO, fontSize: 20, fontWeight: 700,
                     color: F1.text, fontVariantNumeric: 'tabular-nums',
                 }}>
                     {fmtLap(0)}
@@ -77,14 +77,14 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }
 
     return (
         <div style={{
-            position: 'absolute', top: 60, left: 22, zIndex: 12, width: 176,
+            position: 'absolute', top: 62, left: 24, zIndex: 12, width: 190,
             opacity: visible ? 1 : 0.45, transition: 'opacity .25s',
         }}>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2.4, color: F1.dim }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.6, color: F1.dim }}>
                 LAP TIME
             </div>
             <div ref={clockRef} style={{
-                fontFamily: MONO, fontSize: 27, fontWeight: 700, lineHeight: 1.25,
+                fontFamily: MONO, fontSize: 30, fontWeight: 700, lineHeight: 1.25,
                 color: F1.text, fontVariantNumeric: 'tabular-nums', marginBottom: 10,
             }}>
                 {fmtLap(0)}

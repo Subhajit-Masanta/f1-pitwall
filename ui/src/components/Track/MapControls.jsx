@@ -15,8 +15,8 @@ const MapControls = ({ playbackSpeed, setPlaybackSpeed }) => (
                     key={v}
                     onClick={() => setPlaybackSpeed(v)}
                     style={{
-                        minWidth: 32, padding: '5px 0', border: 'none', cursor: 'pointer',
-                        fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                        minWidth: 36, padding: '6px 0', border: 'none', cursor: 'pointer',
+                        fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
                         background: on ? F1.red : F1.bg,
                         color: on ? '#fff' : F1.dim,
                     }}

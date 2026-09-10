@@ -73,13 +73,13 @@ const RaceResults = ({ year, round, raceName }) => {
                 borderBottom: `1px solid ${F1.line}`,
             }}>
                 <span style={{ width: 3, height: 16, background: F1.red }} />
-                <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase' }}>
+                <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
                     {raceName || data.race_name}
                 </span>
-                <span style={{ fontSize: 10, color: F1.dim, letterSpacing: 2 }}>
+                <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 1 }}>
                     RACE CLASSIFICATION · {data.location}
                 </span>
-                <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 11, color: F1.dim }}>
+                <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 12, color: F1.dim }}>
                     {data.total_drivers} CARS
                 </span>
             </div>
@@ -87,8 +87,8 @@ const RaceResults = ({ year, round, raceName }) => {
             <div style={{ overflowX: 'auto' }}>
             {/* column labels */}
             <div style={{
-                display: 'flex', gap: 14, padding: '9px 22px', minWidth: 640,
-                fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: F1.dim,
+                display: 'flex', gap: 14, padding: '10px 22px', minWidth: 660,
+                fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: F1.dim,
                 borderBottom: `1px solid ${F1.hair}`,
             }}>
                 <Cell w={34}>POS</Cell>
@@ -107,8 +107,8 @@ const RaceResults = ({ year, round, raceName }) => {
                 const gainColor = gain > 0 ? F1.drs : gain < 0 ? F1.red : F1.dim;
                 return (
                     <div key={s.number} style={{
-                        display: 'flex', gap: 14, alignItems: 'center', minWidth: 640,
-                        padding: '9px 22px', fontSize: 12,
+                        display: 'flex', gap: 14, alignItems: 'center', minWidth: 660,
+                        padding: '11px 22px', fontSize: 13,
                         borderBottom: `1px solid ${F1.hair}`,
                     }}>
                         <Cell w={34} mono color={s.position <= 3 ? F1.text : F1.dim}>
@@ -136,7 +136,7 @@ const RaceResults = ({ year, round, raceName }) => {
             {/* what's next */}
             <div style={{
                 padding: '14px 22px', display: 'flex', alignItems: 'center', gap: 10,
-                fontSize: 11, color: F1.dim, letterSpacing: 0.5,
+                fontSize: 12.5, color: F1.dim, letterSpacing: 0.3, lineHeight: 1.6,
             }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: F1.faint }} />
                 All-cars track replay for this race is in development — the driver list and team
