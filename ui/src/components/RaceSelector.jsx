@@ -29,12 +29,19 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
         setWaking(false);
         const wakeTimer = setTimeout(() => setWaking(true), 4000);
 
+        // Guard against out-of-order responses: switching year while a slow
+        // calendar request is still in flight would otherwise let the OLD
+        // response land last and overwrite the new season's races.
+        let cancelled = false;
+
         (async () => {
             try {
                 const data = await raceService.getCalendar(year);
+                if (cancelled) return;
                 if (data.error) throw new Error(data.error);
                 setRaces(data);
             } catch (err) {
+                if (cancelled) return;
                 console.error('Failed to load races', err);
                 setError(
                     err.code === 'ECONNABORTED' || !err.response
@@ -42,11 +49,13 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
                         : (err.message || 'Failed to load the calendar.')
                 );
             } finally {
-                clearTimeout(wakeTimer);
-                setLoading(false);
+                if (!cancelled) {
+                    clearTimeout(wakeTimer);
+                    setLoading(false);
+                }
             }
         })();
-        return () => clearTimeout(wakeTimer);
+        return () => { cancelled = true; clearTimeout(wakeTimer); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [year]);
 

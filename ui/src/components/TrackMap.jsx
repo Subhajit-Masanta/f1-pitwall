@@ -16,6 +16,7 @@ import MapControls from './Track/MapControls';
 import TrackCanvas from './Track/TrackCanvas';
 import TelemetryHUD from './TelemetryHUD';
 import SectorTiming from './SectorTiming';
+import SpeedTrace from './SpeedTrace';
 import StageMessage from './StageMessage';
 
 const TrackMap = ({ year, round, session, raceName }) => {
@@ -27,9 +28,10 @@ const TrackMap = ({ year, round, session, raceName }) => {
     const trackRef = useRef(null);
     const hudRef = useRef(null);
     const timingRef = useRef(null);
+    const traceRef = useRef(null);
 
     const {
-        trackData, mapLayout, telemetry, loading, error, reload,
+        trackData, mapLayout, speedTrace, telemetry, loading, error, reload,
         loadReplay, replayError, sectorBoundaries, officialSectorTimes, driver,
     } = useOfficialRaceData(year, round, session);
 
@@ -38,6 +40,7 @@ const TrackMap = ({ year, round, session, raceName }) => {
         trackRef.current?.moveCar(fr.x, fr.y);
         hudRef.current?.update(fr);
         timingRef.current?.update(fr);
+        traceRef.current?.update(fr);
     }, []);
 
     const {
@@ -70,8 +73,11 @@ const TrackMap = ({ year, round, session, raceName }) => {
         background: F1.bg, border: `1px solid ${F1.line}`,
         overflow: 'hidden', display: 'flex',
     };
-    // Room to reserve for the bottom HUD strip.
+    // Room to reserve at the bottom: HUD strip + (if we have one) the trace.
     const hudSpace = narrow ? 180 : 150;
+    const traceH = narrow ? 56 : 76;
+    const traceBlock = speedTrace ? traceH + (narrow ? 34 : 52) : 0;
+    const bottomSpace = hudSpace + traceBlock;
 
     return (
         <div style={stage}>
@@ -129,7 +135,7 @@ const TrackMap = ({ year, round, session, raceName }) => {
             {/* map + car — inset so nothing sits on top of the track */}
             <div style={{
                 position: 'absolute', left: 0, right: 0,
-                top: narrow ? 90 : 46, bottom: hudSpace,
+                top: narrow ? 90 : 46, bottom: bottomSpace,
             }}>
                 <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} />
             </div>
@@ -165,11 +171,20 @@ const TrackMap = ({ year, round, session, raceName }) => {
                 </div>
             )}
 
+            {speedTrace && (
+                <div style={{
+                    position: 'absolute', left: narrow ? 14 : 26, right: narrow ? 14 : 26,
+                    bottom: hudSpace - (narrow ? 4 : 8), zIndex: 11,
+                }}>
+                    <SpeedTrace ref={traceRef} trace={speedTrace} narrow={narrow} height={traceH} />
+                </div>
+            )}
+
             <TelemetryHUD ref={hudRef} narrow={narrow} />
 
             {/* transport */}
             <div style={{
-                position: 'absolute', bottom: hudSpace - 44, left: '50%',
+                position: 'absolute', bottom: bottomSpace - 44, left: '50%',
                 transform: 'translateX(-50%)', zIndex: 16,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
             }}>

@@ -250,9 +250,41 @@ export const useOfficialRaceData = (year, round, session) => {
         };
     }, [trackData, sectorBoundaries]);
 
+    // 4. Speed-vs-distance trace. Built from the track outline (which already
+    //    carries D and S), so it's on screen as soon as the circuit loads rather
+    //    than waiting for the telemetry fetch.
+    //    Drawn in a fixed 1000x100 viewBox and stretched with
+    //    preserveAspectRatio="none" — that makes distance→x a trivial ratio and
+    //    keeps it resolution-independent.
+    const speedTrace = useMemo(() => {
+        const pts = (trackData?.track_points || [])
+            .filter((p) => Number.isFinite(p.D) && Number.isFinite(p.S));
+        if (pts.length < 2) return null;
+
+        const W = 1000, H = 100;
+        const total = trackData.total_distance || pts[pts.length - 1].D || 1;
+        const maxS = Math.max(...pts.map((p) => p.S)) || 1;
+        const minS = Math.min(...pts.map((p) => p.S));
+
+        const x = (d) => (d / total) * W;
+        const y = (sp) => H - (sp / maxS) * H;
+
+        const line = `M ${pts.map((p) => `${x(p.D).toFixed(1)},${y(p.S).toFixed(1)}`).join(' L ')}`;
+        const area = `${line} L ${W},${H} L 0,${H} Z`;
+
+        const b = sectorBoundaries;
+        const sectorX = b ? [x(b.sector1_end), x(b.sector2_end)] : [];
+        const drsBars = (trackData.drs_zones || [])
+            .map((z) => ({ x1: x(z.start), x2: x(z.end) }))
+            .filter((z) => z.x2 > z.x1);
+
+        return { line, area, W, H, total, maxS, minS, sectorX, drsBars };
+    }, [trackData, sectorBoundaries]);
+
     return {
         trackData,
         mapLayout,
+        speedTrace,
         telemetry,
         loading,
         error,
