@@ -22,6 +22,7 @@ function App() {
   const narrow = useIsNarrow(720);
 
   const { mode, round, a, b } = route;
+  const session = route.session || 'Q';
   const year = route.year || DEFAULT_YEAR;
 
   // Display-only: what the round in the URL is actually called. Never routes.
@@ -36,8 +37,8 @@ function App() {
   }, [mode, route.year]);
 
   const go = useCallback((next) => {
-    navigate(buildPath({ mode, year, round, a, b, ...next }));
-  }, [mode, year, round, a, b]);
+    navigate(buildPath({ mode, year, round, session, a, b, ...next }));
+  }, [mode, year, round, session, a, b]);
 
   const leave = () => navigate('/');
 
@@ -77,8 +78,12 @@ function App() {
           <RaceSelector
             year={year}
             round={round}
+            session={session}
+            showSession={mode !== 'race'}
             onYearChange={(y) => go({ year: y, round: null, a: null, b: null })}
             onSelectRound={(r) => go({ round: r, a: null, b: null })}
+            // a different session is a different set of laps and drivers
+            onSelectSession={(sv) => go({ session: sv, a: null, b: null })}
             onRaceResolved={setRaceInfo}
           />
 
@@ -96,10 +101,10 @@ function App() {
               <TrackMap
                 // Changing the reference driver changes which lap everything is
                 // measured against, so the stage is rebuilt rather than patched.
-                key={`${mode}-${year}-${round}-${a || 'fastest'}`}
+                key={`${mode}-${year}-${round}-${session}-${a || 'fastest'}`}
                 year={year}
                 round={round}
-                session="Q"
+                session={session}
                 mode={mode}
                 raceName={raceInfo?.name}
                 referenceDriver={mode === 'compare' ? a : null}

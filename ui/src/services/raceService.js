@@ -4,7 +4,7 @@ export const raceService = {
     /** Race calendar for a season. */
     getCalendar: async (year) => (await api.get(`/races/${year}`)).data,
 
-    /** Which sessions a race weekend had (FP1…Race). */
+    /** The weekend's replayable sessions, in running order, with short codes. */
     getSessions: async (year, round) => (await api.get(`/sessions/${year}/${round}`)).data,
 
     /** Classification for a session — defaults to the race. */

@@ -128,28 +128,53 @@ def pd_isna(v):
         return False
 
 
+# Session name -> the short code FastF1 accepts and the URL carries.
+# The names move around between seasons: 2023 sprint weekends ran a "Sprint
+# Shootout", 2024 renamed it "Sprint Qualifying", and the running order differs
+# too — so the list is read from the event rather than assumed.
+SESSION_CODES = {
+    "Qualifying": "Q",
+    "Race": "R",
+    "Sprint": "S",
+    "Sprint Shootout": "SS",
+    "Sprint Qualifying": "SQ",
+}
+
+
 def get_race_sessions(year: int, race_round: int):
     """
-    Get the specific sessions (FP1, FP2, Quali, Race) for a race.
-    """
-    print(f"[INFO] Fetching sessions for {year} Round {race_round}...")
+    The sessions of a race weekend worth replaying, in running order.
 
+    Practice is deliberately left out: it is long, mostly not representative,
+    and nobody comes here to watch FP2.
+    """
+    key = f"sessions:{CACHE_SCHEMA}:{year}:{race_round}"
+    hit = cache_get(key)
+    if hit is not None:
+        return hit
+
+    print(f"[INFO] Fetching sessions for {year} Round {race_round}...")
     event = fastf1.get_event(year, race_round)
 
-    session_names = []
+    sessions = []
     for i in range(1, 6):
         try:
-            session_name = getattr(event, f"Session{i}")
-            if session_name:
-                session_names.append(session_name)
+            name = getattr(event, f"Session{i}")
         except Exception:
-            pass
+            continue
+        if not name:
+            continue
+        code = SESSION_CODES.get(str(name).strip())
+        if code:
+            sessions.append({"code": code, "name": str(name).strip()})
 
-    return {
+    result = {
         "race": event.EventName,
         "location": event.Location,
-        "sessions": session_names,
+        "sessions": sessions,
     }
+    cache_set(key, result)
+    return result
 
 
 # Bump this whenever the SHAPE of a cached payload changes, so stale entries

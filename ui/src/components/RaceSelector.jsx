@@ -22,11 +22,15 @@ const selectStyle = {
  * /compare/2023/1 authoritative: arriving on it selects the right race without
  * this component ever owning that decision.
  */
-const RaceSelector = ({ year, round, onYearChange, onSelectRound, onRaceResolved }) => {
+const RaceSelector = ({
+    year, round, session, showSession,
+    onYearChange, onSelectRound, onSelectSession, onRaceResolved,
+}) => {
     const [races, setRaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [waking, setWaking] = useState(false);
+    const [sessions, setSessions] = useState([]);
 
     useEffect(() => {
         setLoading(true);
@@ -63,6 +67,25 @@ const RaceSelector = ({ year, round, onYearChange, onSelectRound, onRaceResolved
         })();
         return () => { cancelled = true; clearTimeout(wakeTimer); };
     }, [year]);
+
+    // Which sessions this weekend actually ran. It varies: 2023 sprint weekends
+    // had a "Sprint Shootout", 2024 renamed it "Sprint Qualifying", and the
+    // running order differs — so it's read per round rather than assumed.
+    useEffect(() => {
+        setSessions([]);
+        if (!round) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await raceService.getSessions(year, round);
+                if (cancelled || data.error) return;
+                setSessions(data.sessions || []);
+            } catch (err) {
+                console.warn('Session list unavailable', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [year, round]);
 
     // Tell the parent what the round in the URL actually refers to, so headers
     // can name the race. Display only — it never drives the route.
@@ -106,6 +129,21 @@ const RaceSelector = ({ year, round, onYearChange, onSelectRound, onRaceResolved
                     </option>
                 ))}
             </select>
+
+            {showSession && selected && (
+                <select
+                    value={session || 'Q'}
+                    onChange={(e) => onSelectSession?.(e.target.value)}
+                    style={{ ...selectStyle, minWidth: 132 }}
+                    disabled={sessions.length === 0}
+                >
+                    {sessions.length === 0
+                        ? <option value={session || 'Q'}>Loading sessions…</option>
+                        : sessions.map((s) => (
+                            <option key={s.code} value={s.code}>{s.name}</option>
+                        ))}
+                </select>
+            )}
 
             {selected && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: F1.dim, fontSize: 12, letterSpacing: 0.5 }}>

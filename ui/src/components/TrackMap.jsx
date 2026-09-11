@@ -11,6 +11,7 @@ import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
 import { useIsNarrow } from '../hooks/useResponsive';
 import { F1, MONO, SPEED_GRADIENT } from '../theme';
+import { SESSION_LABEL } from '../lib/router';
 
 import MapControls from './Track/MapControls';
 import TrackCanvas from './Track/TrackCanvas';
@@ -288,10 +289,24 @@ const TrackMap = ({
                 }}>
                     {raceName || trackData?.circuit}
                 </span>
+
+                {/* Which session's lap this is. Without it "fastest lap" is
+                    ambiguous — Monaco's qualifying best and race best are 4.3s
+                    and a different driver apart. */}
+                <span style={{
+                    padding: '3px 7px', fontSize: 9, fontWeight: 700,
+                    letterSpacing: 1.2, textTransform: 'uppercase',
+                    color: F1.text, background: F1.line, whiteSpace: 'nowrap',
+                }}>
+                    {SESSION_LABEL[session] || session}
+                </span>
                 {!narrow && !comparing && (
                     <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 1.2 }}>
                         {driver
-                            ? `FASTEST LAP · ${driver.code} · ${driver.team}`.toUpperCase()
+                            ? `FASTEST ${SESSION_LABEL[session] || ''} LAP · ${driver.code} · ${driver.team}`.toUpperCase()
+                            // the badge beside the title already names the
+                            // session, so this stays plain rather than reading
+                            // "FASTEST LAP OF RACE"
                             : 'FASTEST LAP OF THE SESSION'}
                     </span>
                 )}
