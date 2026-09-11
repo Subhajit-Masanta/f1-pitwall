@@ -13,9 +13,9 @@
 import React, {
     memo, forwardRef, useRef, useEffect, useCallback, useImperativeHandle,
 } from 'react';
-import { F1, MONO } from '../../theme';
+import { F1, MONO, speedColor } from '../../theme';
 
-const TrackCanvas = memo(forwardRef(({ mapLayout }, ref) => {
+const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
     const wrapRef = useRef(null);
     const carRef = useRef(null);
     const proj = useRef({ scale: 1, offX: 0, offY: 0 });
@@ -65,9 +65,10 @@ const TrackCanvas = memo(forwardRef(({ mapLayout }, ref) => {
 
     if (!mapLayout) return null;
 
-    const { viewBox, d, mapSize, ticks, drsPaths, corners } = mapLayout;
+    const { viewBox, d, mapSize, ticks, drsPaths, corners, speedSegments } = mapLayout;
     const lw = mapSize * 0.0055;          // track line: thin
     const label = mapSize * 0.017;
+    const speedView = view === 'speed' && speedSegments?.length > 0;
 
     const Tick = ({ t, color, text }) => !t ? null : (
         <g>
@@ -86,7 +87,15 @@ const TrackCanvas = memo(forwardRef(({ mapLayout }, ref) => {
             <svg
                 width="100%" height="100%" viewBox={viewBox}
                 preserveAspectRatio="xMidYMid meet"
-                style={{ position: 'absolute', inset: 0, display: 'block' }}
+                style={{
+                    position: 'absolute', inset: 0, display: 'block',
+                    // Promote the static track to its own compositor layer. The
+                    // speed view draws ~170 stroked paths; without this the
+                    // browser re-rasterises all of them every time the car moves
+                    // over them (measured: p99 frame 7.3ms -> 20.9ms).
+                    willChange: 'transform',
+                    transform: 'translateZ(0)',
+                }}
             >
                 {/* corner numbers, sitting behind everything */}
                 {corners.map((c) => (
@@ -97,19 +106,33 @@ const TrackCanvas = memo(forwardRef(({ mapLayout }, ref) => {
                     </text>
                 ))}
 
-                {/* the track */}
-                <path d={d} fill="none" stroke={F1.track}
-                    strokeWidth={lw} strokeLinecap="round" strokeLinejoin="round" />
-
-                {/* DRS zones — the only colour on the map */}
-                {drsPaths.map((z, i) => (
-                    <g key={i}>
-                        <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.16"
-                            strokeWidth={lw * 3.2} strokeLinecap="round" />
-                        <path d={z.d} fill="none" stroke={F1.drs}
-                            strokeWidth={lw * 1.3} strokeLinecap="round" />
-                    </g>
-                ))}
+                {speedView ? (
+                    /* SPEED VIEW — the line itself carries the data.
+                       Each short run is tinted by its mean speed. A dark casing
+                       underneath keeps the thin colours readable on black. */
+                    <>
+                        <path d={d} fill="none" stroke="#000" strokeOpacity="0.85"
+                            strokeWidth={lw * 2.6} strokeLinecap="round" strokeLinejoin="round" />
+                        {speedSegments.map((seg, i) => (
+                            <path key={i} d={seg.d} fill="none" stroke={speedColor(seg.t)}
+                                strokeWidth={lw * 1.7} strokeLinecap="round" strokeLinejoin="round" />
+                        ))}
+                    </>
+                ) : (
+                    /* MAP VIEW — neutral line, DRS zones are the only colour. */
+                    <>
+                        <path d={d} fill="none" stroke={F1.track}
+                            strokeWidth={lw} strokeLinecap="round" strokeLinejoin="round" />
+                        {drsPaths.map((z, i) => (
+                            <g key={i}>
+                                <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.16"
+                                    strokeWidth={lw * 3.2} strokeLinecap="round" />
+                                <path d={z.d} fill="none" stroke={F1.drs}
+                                    strokeWidth={lw * 1.3} strokeLinecap="round" />
+                            </g>
+                        ))}
+                    </>
+                )}
 
                 {/* sector + start-finish ticks */}
                 <Tick t={ticks.s1} color={F1.s1} text="S1" />

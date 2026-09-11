@@ -152,6 +152,11 @@ def get_race_sessions(year: int, race_round: int):
     }
 
 
+# Bump this whenever the SHAPE of a cached payload changes, so stale entries
+# from an older schema are ignored instead of silently served.
+#   v2 — added per-point speed ("S") to track_points for the speed-coloured line
+CACHE_SCHEMA = "v2"
+
 # How many points to send for the static track outline.
 TRACK_OUTLINE_POINTS = 500
 # How many points the smooth racing line is built from internally.
@@ -170,15 +175,17 @@ def _racing_line(tel, smooth_window: int = 3):
     Distance channel, gives motion whose speed tracks the real telemetry speed
     to r > 0.99.
 
-    Returns (s_grid, x_grid, y_grid, total_length) — all in FastF1 X/Y units
-    (tenths of a metre), s_grid evenly spaced from 0 to total_length.
+    Returns (s_grid, x_grid, y_grid, speed_grid, total_length) — X/Y in FastF1
+    units (tenths of a metre), speed in km/h, s_grid evenly spaced from 0 to
+    total_length.
     """
     x = tel["X"].to_numpy().astype(float)
     y = tel["Y"].to_numpy().astype(float)
+    spd = np.nan_to_num(tel["Speed"].to_numpy().astype(float))
 
     # Drop consecutive duplicate positions (car "parked" in the raw data).
     keep = np.r_[True, (np.diff(x) != 0) | (np.diff(y) != 0)]
-    x, y = x[keep], y[keep]
+    x, y, spd = x[keep], y[keep], spd[keep]
 
     # Light moving-average to take the edge off GPS jitter.
     w = smooth_window
@@ -192,11 +199,19 @@ def _racing_line(tel, smooth_window: int = 3):
         x, y = _sm(x), _sm(y)
 
     # Arc length along the line, then resample onto a uniform grid.
+    # NOTE: only X/Y are smoothed — speed is carried through raw so the colour
+    # ramp shows the real profile, not a blurred one.
     seg = np.hypot(np.diff(x), np.diff(y))
     arc = np.r_[0.0, np.cumsum(seg)]
     total = float(arc[-1]) or 1.0
     s_grid = np.linspace(0.0, total, RACING_LINE_POINTS)
-    return s_grid, np.interp(s_grid, arc, x), np.interp(s_grid, arc, y), total
+    return (
+        s_grid,
+        np.interp(s_grid, arc, x),
+        np.interp(s_grid, arc, y),
+        np.interp(s_grid, arc, spd),
+        total,
+    )
 
 
 def _sector_ends(fastest_lap, t_raw, d_raw, total_distance):
@@ -261,6 +276,8 @@ def _trim(payload):
         p["X"] = round(p["X"], 1)
         p["Y"] = round(p["Y"], 1)
         p["D"] = round(p["D"], 1)
+        if "S" in p:
+            p["S"] = round(p["S"], 1)
     return payload
 
 
@@ -269,7 +286,7 @@ def get_track_data(year: int, race_round: int, session_type: str):
     Track layout (smooth X/Y line) from the fastest lap, plus the official
     rotation and sector-boundary distances so the frontend can colour it.
     """
-    key = f"track:{year}:{race_round}:{session_type}"
+    key = f"track:{CACHE_SCHEMA}:{year}:{race_round}:{session_type}"
     hit = cache_get(key)
     if hit is not None:
         print(f"[CACHE HIT] {key}")
@@ -293,13 +310,14 @@ def get_track_data(year: int, race_round: int, session_type: str):
     # FastF1 Distance agree to within ~0.3% over a lap, so each point's "D" is
     # just its arc-length fraction scaled to the real lap distance - enough for
     # the frontend to split the path into sectors.
-    s_grid, x_grid, y_grid, line_len = _racing_line(telemetry)
+    s_grid, x_grid, y_grid, spd_grid, line_len = _racing_line(telemetry)
     step = max(1, len(s_grid) // TRACK_OUTLINE_POINTS)
     track_data = [
         {
             "X": float(x_grid[i]),
             "Y": float(y_grid[i]),
             "D": float(s_grid[i] / line_len * total_distance),
+            "S": float(spd_grid[i]),          # km/h at this point on the line
         }
         for i in range(0, len(s_grid), step)
     ]
@@ -350,7 +368,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
     30 Hz timeline. Position (x, y) comes from a smoothed arc-length racing line
     driven by the clean Distance channel - see `_racing_line` for why.
     """
-    key = f"tel:{year}:{round_num}:{session_type}:{str(driver_id).lower()}"
+    key = f"tel:{CACHE_SCHEMA}:{year}:{round_num}:{session_type}:{str(driver_id).lower()}"
     hit = cache_get(key)
     if hit is not None:
         print(f"[CACHE HIT] {key}")
@@ -393,7 +411,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
     total_distance = float(d_raw.max())
 
     # --- POSITION: smooth line, arc-length parameterised, driven by Distance ---
-    s_grid, x_grid, y_grid, line_len = _racing_line(tel)
+    s_grid, x_grid, y_grid, _spd_grid, line_len = _racing_line(tel)
     dist_t = np.interp(timeline, t_raw, d_raw)                       # clean, monotone
     s_t = np.clip((dist_t - d_raw[0]) / (d_raw[-1] - d_raw[0]), 0, 1) * line_len
     x_interp = np.interp(s_t, s_grid, x_grid)

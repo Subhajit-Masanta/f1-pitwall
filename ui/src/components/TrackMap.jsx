@@ -10,7 +10,7 @@ import { Play, Pause, RotateCcw } from 'lucide-react';
 import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
 import { useIsNarrow } from '../hooks/useResponsive';
-import { F1 } from '../theme';
+import { F1, MONO, SPEED_GRADIENT } from '../theme';
 
 import MapControls from './Track/MapControls';
 import TrackCanvas from './Track/TrackCanvas';
@@ -21,6 +21,7 @@ import StageMessage from './StageMessage';
 const TrackMap = ({ year, round, session, raceName }) => {
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [loadingReplay, setLoadingReplay] = useState(false);
+    const [view, setView] = useState('map');   // 'map' | 'speed'
     const narrow = useIsNarrow(720);
 
     const trackRef = useRef(null);
@@ -94,7 +95,25 @@ const TrackMap = ({ year, round, session, raceName }) => {
                             : 'FASTEST LAP OF THE SESSION'}
                     </span>
                 )}
-                <div style={{ marginLeft: 'auto' }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {mapLayout.speedSegments?.length > 0 && (
+                        <div style={{ display: 'flex', gap: 1, background: F1.line }}>
+                            {[['map', 'MAP'], ['speed', 'SPEED']].map(([id, lbl]) => (
+                                <button
+                                    key={id}
+                                    onClick={() => setView(id)}
+                                    style={{
+                                        padding: '6px 10px', border: 'none', cursor: 'pointer',
+                                        fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                                        background: view === id ? F1.text : F1.bg,
+                                        color: view === id ? F1.bg : F1.dim,
+                                    }}
+                                >
+                                    {lbl}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <MapControls playbackSpeed={playbackSpeed} setPlaybackSpeed={setPlaybackSpeed} />
                 </div>
             </div>
@@ -112,11 +131,29 @@ const TrackMap = ({ year, round, session, raceName }) => {
                 position: 'absolute', left: 0, right: 0,
                 top: narrow ? 90 : 46, bottom: hudSpace,
             }}>
-                <TrackCanvas ref={trackRef} mapLayout={mapLayout} />
+                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} />
             </div>
 
-            {/* DRS legend — desktop only, it crowds a phone */}
-            {drsCount > 0 && !narrow && (
+            {/* legend — desktop only, it crowds a phone */}
+            {!narrow && view === 'speed' && mapLayout.speedRange && (
+                <div style={{
+                    position: 'absolute', right: 22, top: 60, zIndex: 12,
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
+                }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
+                        SPEED
+                    </span>
+                    <div style={{ width: 132, height: 6, background: SPEED_GRADIENT }} />
+                    <div style={{
+                        width: 132, display: 'flex', justifyContent: 'space-between',
+                        fontFamily: MONO, fontSize: 10, color: F1.dim,
+                    }}>
+                        <span>{Math.round(mapLayout.speedRange.min)}</span>
+                        <span>{Math.round(mapLayout.speedRange.max)} km/h</span>
+                    </div>
+                </div>
+            )}
+            {!narrow && view === 'map' && drsCount > 0 && (
                 <div style={{
                     position: 'absolute', right: 22, top: 62, zIndex: 12,
                     display: 'flex', alignItems: 'center', gap: 8,

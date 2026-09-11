@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import fastf1  # noqa: E402
 from database import cache_get, cache_set, check_db_connection  # noqa: E402
 from services.fastf1_service import (  # noqa: E402
+    CACHE_SCHEMA,
     get_track_data,
     get_lap_telemetry,
     get_race_results,
@@ -43,7 +44,8 @@ def completed_rounds(year: int):
 def warm_one(year, rnd, name, sessions, force):
     for st in sessions:
         label = f"{year} R{rnd:<2} {st}  {name[:34]}"
-        keys = [f"track:{year}:{rnd}:{st}", f"tel:{year}:{rnd}:{st}:fastest"]
+        keys = [f"track:{CACHE_SCHEMA}:{year}:{rnd}:{st}",
+                f"tel:{CACHE_SCHEMA}:{year}:{rnd}:{st}:fastest"]
         if not force and all(cache_get(k) is not None for k in keys):
             print(f"  SKIP  {label}  (cached)")
             continue
@@ -61,7 +63,7 @@ def warm_one(year, rnd, name, sessions, force):
             # results are cheap but nice to have warm too
             try:
                 res = get_race_results(year, rnd, st)
-                cache_set(f"res:{year}:{rnd}:{st}", res)
+                cache_set(f"res:{CACHE_SCHEMA}:{year}:{rnd}:{st}", res)
             except Exception:
                 pass
             print(f"  OK    {label}  {time.time()-t0:5.1f}s")

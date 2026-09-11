@@ -45,3 +45,40 @@ export const fmtLap = (t) => {
 /** 28.736 -> "28.736" */
 export const fmtSector = (t) =>
     (t == null || Number.isNaN(t)) ? '--.---' : t.toFixed(3);
+
+/**
+ * Speed → colour ramp for the racing line.
+ *
+ * Deliberately avoids the palette's meaning-carrying colours (F1 red = the car,
+ * DRS green = DRS zones) at the ends where they'd be confused. Indigo → cyan →
+ * spring → amber → red reads as "slow to fast" instantly and every stop stays
+ * bright enough to see on the near-black background.
+ */
+const SPEED_STOPS = [
+    [0.00, [92, 76, 255]],    // indigo   — slowest corner
+    [0.28, [0, 178, 255]],    // cyan
+    [0.55, [0, 226, 160]],    // spring
+    [0.78, [255, 208, 0]],    // amber
+    [1.00, [255, 62, 48]],    // red      — top speed
+];
+
+/** t in 0..1 → "rgb(r,g,b)" */
+export const speedColor = (t) => {
+    const x = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+    for (let i = 1; i < SPEED_STOPS.length; i++) {
+        const [p1, c1] = SPEED_STOPS[i - 1];
+        const [p2, c2] = SPEED_STOPS[i];
+        if (x <= p2) {
+            const f = p2 === p1 ? 0 : (x - p1) / (p2 - p1);
+            const c = c1.map((v, j) => Math.round(v + (c2[j] - v) * f));
+            return `rgb(${c[0]},${c[1]},${c[2]})`;
+        }
+    }
+    const last = SPEED_STOPS[SPEED_STOPS.length - 1][1];
+    return `rgb(${last[0]},${last[1]},${last[2]})`;
+};
+
+/** CSS gradient string for the speed legend. */
+export const SPEED_GRADIENT = `linear-gradient(90deg, ${SPEED_STOPS
+    .map(([p, c]) => `rgb(${c[0]},${c[1]},${c[2]}) ${(p * 100).toFixed(0)}%`)
+    .join(', ')})`;

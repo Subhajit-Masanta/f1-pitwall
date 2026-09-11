@@ -68,7 +68,8 @@ export const useOfficialRaceData = (year, round, session) => {
                 const angle = data.rotation || 0;
                 data.track_points = (data.track_points || []).map((p) => {
                     const r = applyRotation(p.X, p.Y, angle);
-                    return { X: r.x, Y: r.y, D: p.D ?? 0 };
+                    // keep D (lap distance) and S (speed) — rotation only moves X/Y
+                    return { X: r.x, Y: r.y, D: p.D ?? 0, S: p.S };
                 });
                 data.corners = (data.corners || []).map((c) => {
                     const r = applyRotation(c.X, c.Y, angle);
@@ -139,7 +140,7 @@ export const useOfficialRaceData = (year, round, session) => {
 
         const pts = trackData.track_points
             .filter((p) => Number.isFinite(p.X) && Number.isFinite(p.Y))
-            .map((p) => ({ x: p.X, y: -p.Y, d: p.D })); // flip Y for SVG
+            .map((p) => ({ x: p.X, y: -p.Y, d: p.D, s: p.S })); // flip Y for SVG
 
         if (pts.length < 2) return null;
 
@@ -218,7 +219,35 @@ export const useOfficialRaceData = (year, round, session) => {
             return { n: c.n, letter: c.letter, x, y, lx: x + (vx / m) * off, ly: y + (vy / m) * off };
         });
 
-        return { viewBox, d, mapSize, ticks, drsPaths, corners, hasSectors: !!b };
+        // Speed-coloured racing line: chop the outline into short runs and give
+        // each the colour of its mean speed. Segments overlap by one point so
+        // there's no visible seam. Static — built once, never during playback.
+        let speedSegments = [];
+        let speedRange = null;
+        const speeds = pts.map((p) => p.s).filter((v) => Number.isFinite(v));
+        if (speeds.length === pts.length && speeds.length > 1) {
+            const lo = Math.min(...speeds);
+            const hi = Math.max(...speeds);
+            const span = hi - lo || 1;
+            speedRange = { min: lo, max: hi };
+
+            const RUN = 3;
+            for (let i = 0; i < pts.length - 1; i += RUN) {
+                const chunk = pts.slice(i, Math.min(i + RUN + 1, pts.length));
+                if (chunk.length < 2) continue;
+                const mean = chunk.reduce((a, q) => a + q.s, 0) / chunk.length;
+                speedSegments.push({ d: toPath(chunk), t: (mean - lo) / span });
+            }
+            // close the loop back to the start/finish point
+            const tail = [pts[pts.length - 1], pts[0]];
+            const meanTail = (tail[0].s + tail[1].s) / 2;
+            speedSegments.push({ d: toPath(tail), t: (meanTail - lo) / span });
+        }
+
+        return {
+            viewBox, d, mapSize, ticks, drsPaths, corners,
+            hasSectors: !!b, speedSegments, speedRange,
+        };
     }, [trackData, sectorBoundaries]);
 
     return {
