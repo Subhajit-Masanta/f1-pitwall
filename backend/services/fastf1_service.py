@@ -163,7 +163,10 @@ def get_race_sessions(year: int, race_round: int):
 #        arc-length scaled proportionally (they drift up to 33m apart)
 #   v7 — invalidates v6: those entries were written while the car's position
 #        mapping was briefly (and wrongly) inverted rather than pro-rata
-CACHE_SCHEMA = "v7"
+#   v8 — added team_color to telemetry + the /drivers picker payload
+#   v9 — the playback timeline now lands exactly on the lap time; np.arange
+#        stopped up to one frame short, so every replay ended early
+CACHE_SCHEMA = "v9"
 
 # How many points to send for the static track outline.
 TRACK_OUTLINE_POINTS = 500
@@ -361,6 +364,61 @@ def _trim(payload):
     return payload
 
 
+def get_session_drivers(year: int, race_round: int, session_type: str):
+    """
+    Everyone who set a lap in this session, ordered by their fastest one.
+
+    This is the picker for head-to-head: code, team, team colour and the gap to
+    the session-best, so the UI can show a real timing-sheet ordering rather
+    than an arbitrary driver list.
+    """
+    key = f"drivers:{CACHE_SCHEMA}:{year}:{race_round}:{session_type}"
+    hit = cache_get(key)
+    if hit is not None:
+        print(f"[CACHE HIT] {key}")
+        return hit
+
+    session = fastf1.get_session(year, race_round, session_type)
+    session.load()
+
+    laps = session.laps
+    if laps is None or laps.empty:
+        return {"error": "No laps in this session"}
+
+    best = laps.groupby("DriverNumber")["LapTime"].min().sort_values()
+
+    drivers = []
+    pole = None
+    for num, lap_time in best.items():
+        if lap_time is None or np.isnan(lap_time.total_seconds()):
+            continue
+        secs = float(lap_time.total_seconds())
+        if pole is None:
+            pole = secs
+        try:
+            info = session.get_driver(num)
+            code = str(info["Abbreviation"])
+            name = str(info["FullName"])
+            team = str(info["TeamName"])
+            colour = str(info["TeamColor"] or "").strip().lstrip("#")
+        except Exception:
+            code, name, team, colour = str(num), str(num), "", ""
+        drivers.append({
+            "number": str(num),
+            "code": code,
+            "name": name,
+            "team": team,
+            # FastF1 gives the hex without the hash
+            "color": f"#{colour}" if colour else "#9E9E9E",
+            "lap_time": round(secs, 3),
+            "gap": round(secs - pole, 3),
+        })
+
+    result = {"drivers": drivers, "session": session.name}
+    cache_set(key, result)
+    return result
+
+
 def get_track_data(year: int, race_round: int, session_type: str):
     """
     Track layout (smooth X/Y line) from the fastest lap, plus the official
@@ -493,12 +551,22 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
         driver_code = str(info["Abbreviation"])
         driver_name = str(info["FullName"])
         team_name = str(info["TeamName"])
+        colour = str(info["TeamColor"] or "").strip().lstrip("#")
+        team_color = f"#{colour}" if colour else "#9E9E9E"
     except Exception:
         driver_code, driver_name, team_name = str(driver_id), str(driver_id), ""
+        team_color = "#9E9E9E"
 
     tel = fastest.get_telemetry()
     lap_time = fastest["LapTime"].total_seconds()
+    # np.arange stops BEFORE the endpoint, so the last frame landed up to one
+    # frame (33ms) short of the real lap time — by a different amount for every
+    # driver, since it depends where lap_time falls between samples. That made
+    # the replay finish early and, worse, made a head-to-head delta wrong at the
+    # flag by the difference between the two shortfalls. Pin the final instant.
     timeline = np.arange(0, lap_time, 1.0 / PLAYBACK_FPS)
+    if timeline[-1] < lap_time:
+        timeline = np.r_[timeline, lap_time]
 
     t_raw = tel["Time"].dt.total_seconds().to_numpy()
     d_raw = tel["Distance"].to_numpy().astype(float)
@@ -578,6 +646,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
 
     result = _trim({
         "driver": driver_id,
+        "team_color": team_color,
         "peak_decel_g": peak_decel_g,
         "driver_code": driver_code,
         "driver_name": driver_name,

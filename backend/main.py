@@ -11,6 +11,7 @@ from services.fastf1_service import (
     get_race_sessions,
     get_track_data,
     get_lap_telemetry,
+    get_session_drivers,
 )
 
 
@@ -117,6 +118,12 @@ def get_track(year: int, round: int, session: str):
     Example: /track/2023/7/R
     """
     return get_track_data(year, round, session)
+
+@app.get("/drivers/{year}/{round}/{session}")
+def get_drivers(year: int, round: int, session: str):
+    """Everyone who set a lap, ordered by their fastest — the head-to-head picker."""
+    return get_session_drivers(year, round, session)
+
 
 @app.get("/telemetry/{year}/{round}/{session}/{driver}")
 def get_telemetry_endpoint(year: int, round: int, session: str, driver: str):

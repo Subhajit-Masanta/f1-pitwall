@@ -1,8 +1,10 @@
 /**
  * 📄 Landing.jsx — mode picker.
  *
- * Two ways into the data: one lap in detail, or a whole race. Kept to the same
- * minimal language as the replay stage — hairlines, mono numerals, one accent.
+ * Three ways into the data: one lap in detail, two laps against each other, or
+ * a whole race. Each is its own route, so any of them can be linked to directly.
+ * Kept to the same minimal language as the replay stage — hairlines, mono
+ * numerals, one accent.
  */
 import React from 'react';
 import { ArrowRight } from 'lucide-react';
@@ -10,15 +12,22 @@ import { F1, MONO } from '../theme';
 
 const MODES = [
     {
-        id: 'quali',
+        id: 'lap',
         n: '01',
-        title: 'Fastest Qualifying Lap',
-        blurb: 'The quickest lap of the session, replayed from real telemetry — sector splits, DRS zones, corner-by-corner speed, gear and pedal traces.',
+        title: 'Fastest Lap',
+        blurb: 'The quickest lap of the session, replayed from real telemetry — sector splits, DRS zones, corner-by-corner speed, and the pedal and braking traces.',
+        state: 'available',
+    },
+    {
+        id: 'compare',
+        n: '02',
+        title: 'Head to Head',
+        blurb: 'Two drivers on the same lap of track. A ghost car, both traces overlaid, and a live delta that lands exactly on the official gap at the flag.',
         state: 'available',
     },
     {
         id: 'race',
-        n: '02',
+        n: '03',
         title: 'Full Race',
         blurb: 'Final classification, grid positions and points for any Grand Prix. The all-cars-on-track replay is the next thing being built.',
         state: 'partial',
@@ -31,7 +40,7 @@ const Card = ({ mode, onPick }) => {
         <button
             onClick={() => onPick(mode.id)}
             style={{
-                flex: '1 1 340px', minWidth: 300, textAlign: 'left', cursor: 'pointer',
+                flex: '1 1 290px', minWidth: 268, textAlign: 'left', cursor: 'pointer',
                 background: 'transparent', color: 'inherit',
                 border: `1px solid ${F1.line}`, padding: '26px 28px 22px',
                 display: 'flex', flexDirection: 'column', gap: 16,

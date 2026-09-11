@@ -14,19 +14,25 @@ const selectStyle = {
     cursor: 'pointer',
 };
 
-const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
+/**
+ * Season + Grand Prix picker.
+ *
+ * The selection lives in the URL, not in here — `year` and `round` come down as
+ * props and changes are reported back up. That keeps a link like
+ * /compare/2023/1 authoritative: arriving on it selects the right race without
+ * this component ever owning that decision.
+ */
+const RaceSelector = ({ year, round, onYearChange, onSelectRound, onRaceResolved }) => {
     const [races, setRaces] = useState([]);
-    const [selectedRaceId, setSelectedRaceId] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [waking, setWaking] = useState(false);
 
     useEffect(() => {
-        setSelectedRaceId('');
-        onSelectRace(null);
         setLoading(true);
         setError(null);
         setWaking(false);
+        setRaces([]);
         const wakeTimer = setTimeout(() => setWaking(true), 4000);
 
         // Guard against out-of-order responses: switching year while a slow
@@ -56,14 +62,15 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
             }
         })();
         return () => { cancelled = true; clearTimeout(wakeTimer); };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [year]);
 
-    const handleChange = (e) => {
-        const raceId = e.target.value;
-        setSelectedRaceId(raceId);
-        onSelectRace(races.find((r) => r.round === parseInt(raceId, 10)) || null);
-    };
+    // Tell the parent what the round in the URL actually refers to, so headers
+    // can name the race. Display only — it never drives the route.
+    const selected = races.find((r) => r.round === round) || null;
+    useEffect(() => {
+        onRaceResolved?.(selected);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selected?.round, races.length]);
 
     return (
         <div style={{
@@ -71,7 +78,11 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
         }}>
             <Calendar color={F1.red} size={18} />
 
-            <select value={year} onChange={(e) => onYearChange(parseInt(e.target.value, 10))} style={selectStyle}>
+            <select
+                value={year}
+                onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
+                style={selectStyle}
+            >
                 {Array.from(
                     { length: new Date().getFullYear() - 2018 + 1 },
                     (_, i) => new Date().getFullYear() - i
@@ -79,8 +90,8 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
             </select>
 
             <select
-                value={selectedRaceId}
-                onChange={handleChange}
+                value={selected ? String(selected.round) : ''}
+                onChange={(e) => onSelectRound(e.target.value ? parseInt(e.target.value, 10) : null)}
                 style={{ ...selectStyle, minWidth: 260, flex: '1 1 260px', maxWidth: 380 }}
                 disabled={loading || !!error}
             >
@@ -96,10 +107,10 @@ const RaceSelector = ({ onSelectRace, year, onYearChange }) => {
                 ))}
             </select>
 
-            {selectedRaceId && (
+            {selected && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: F1.dim, fontSize: 12, letterSpacing: 0.5 }}>
                     <MapPin size={14} />
-                    {races.find((r) => r.round === parseInt(selectedRaceId, 10))?.location}
+                    {selected.location}
                 </div>
             )}
 

@@ -17,11 +17,65 @@ import TrackCanvas from './Track/TrackCanvas';
 import TelemetryHUD from './TelemetryHUD';
 import SectorTiming from './SectorTiming';
 import SpeedTrace from './SpeedTrace';
+import DeltaBar from './DeltaBar';
 import StageMessage from './StageMessage';
 
-const TrackMap = ({ year, round, session, raceName }) => {
+/**
+ * One driver slot in a head-to-head. Both slots use this, so neither is
+ * privileged — the "reference" is just whichever driver sits in slot A.
+ */
+const DriverPicker = ({
+    slot, value, drivers, exclude, color, loading, placeholder, prefix, onChange,
+}) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        {prefix && (
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: F1.faint }}>
+                {prefix}
+            </span>
+        )}
+        <select
+            value={value}
+            onChange={(e) => onChange?.(slot, e.target.value || null)}
+            disabled={loading || drivers.length === 0}
+            style={{
+                padding: '5px 8px', fontSize: 11, fontWeight: 600,
+                letterSpacing: 0.4, background: F1.bg,
+                color: value ? F1.text : F1.dim,
+                // the select itself carries the driver's team colour
+                border: `1px solid ${color || F1.line}`,
+                cursor: loading ? 'wait' : 'pointer', maxWidth: 190,
+            }}
+        >
+            <option value="">
+                {drivers.length === 0
+                    ? 'Loading drivers…'
+                    : loading ? 'Loading driver…' : (placeholder || '— pick a driver —')}
+            </option>
+            {drivers
+                // can't race a driver against himself
+                .filter((d) => d.number !== exclude)
+                .map((d) => (
+                    <option key={d.number} value={d.number}>
+                        {d.code} · {d.gap > 0 ? `+${d.gap.toFixed(3)}` : d.gap.toFixed(3)}
+                    </option>
+                ))}
+        </select>
+    </div>
+);
+
+const TrackMap = ({
+    year, round, session, raceName,
+    mode = 'lap',              // 'lap' | 'compare'
+    referenceDriver = null,    // driver A, from the URL (null = session fastest)
+    compareWith = null,        // driver B, from the URL
+    onPickDriver,
+}) => {
+    const comparing = mode === 'compare';
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [loadingReplay, setLoadingReplay] = useState(false);
+    // Whether playback has actually been started, as distinct from whether the
+    // telemetry happens to be loaded — compare mode preloads it.
+    const [hasPlayed, setHasPlayed] = useState(false);
     const [view, setView] = useState('map');   // 'map' | 'speed'
     // Trace open/closed, remembered between visits.
     const [showTrace, setShowTrace] = useState(() => {
@@ -33,18 +87,44 @@ const TrackMap = ({ year, round, session, raceName }) => {
     const hudRef = useRef(null);
     const timingRef = useRef(null);
     const traceRef = useRef(null);
+    const deltaRef = useRef(null);
 
     const {
         trackData, mapLayout, speedTrace, telemetry, loading, error, reload,
         loadReplay, replayError, sectorBoundaries, officialSectorTimes, driver,
-    } = useOfficialRaceData(year, round, session);
+        drivers, ghost, ghostLoading, loadGhost, compareTrace,
+    } = useOfficialRaceData(year, round, session, referenceDriver);
+
+    // The loop reads the ghost through a ref, so picking a driver mid-lap never
+    // rebuilds the rAF loop.
+    const ghostRef = useRef(null);
+    ghostRef.current = ghost;
+    // Reference lap's own total distance — the denominator that turns the
+    // leader's position into a lap fraction the ghost can be compared at.
+    const refDistRef = useRef(1);
+    refDistRef.current = telemetry?.length
+        ? (telemetry[telemetry.length - 1].distance || 1)
+        : 1;
 
     // Every animation frame — pure DOM writes, zero React.
     const onFrame = useCallback((fr) => {
+        const g = ghostRef.current;
+        if (g) {
+            // Where the ghost is at the same elapsed time...
+            const p = g.posAtTime(fr.time);
+            trackRef.current?.moveGhost(p.x, p.y);
+            // ...and how long IT took to reach where the reference car is now.
+            // Positive = the ghost got here later, i.e. it is down on the lap.
+            fr.delta = g.timeAtFraction(fr.dist / refDistRef.current) - fr.time;
+        } else {
+            trackRef.current?.moveGhost(null, null);
+            fr.delta = null;
+        }
         trackRef.current?.moveCar(fr.x, fr.y);
         hudRef.current?.update(fr);
         timingRef.current?.update(fr);
         traceRef.current?.update(fr);
+        deltaRef.current?.update(fr);
     }, []);
 
     const {
@@ -57,6 +137,15 @@ const TrackMap = ({ year, round, session, raceName }) => {
         const g = speedTrace?.pedal?.peakG;
         if (g) hudRef.current?.setPeakG(g);
     }, [speedTrace]);
+
+    // The compared driver comes from the URL, so /compare/2023/1?vs=16 opens
+    // straight into that head-to-head and the link survives a refresh.
+    useEffect(() => {
+        if (!comparing) { loadGhost(null); return; }
+        if (!trackData) return;            // rotation not known yet
+        if ((compareWith || null) !== (ghost?.number || null)) loadGhost(compareWith);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [comparing, compareWith, trackData, drivers.length]);
 
     // Scale the shift lights to the revs this lap actually uses. An F1 engine
     // never comes near zero on a flying lap, so a 0-to-redline strip sits almost
@@ -77,12 +166,27 @@ const TrackMap = ({ year, round, session, raceName }) => {
     }, []);
 
     const handleStart = useCallback(async () => {
+        setHasPlayed(true);
         if (telemetry) { play(); return; }        // already loaded (resume/replay)
         setLoadingReplay(true);
         const ok = await loadReplay();
         setLoadingReplay(false);
         if (ok) play();
     }, [telemetry, loadReplay, play]);
+
+    // Comparing needs BOTH laps to draw the delta across the circuit, so the
+    // reference lap is fetched up front rather than on first play — otherwise
+    // the delta chart is blank until you press the button, which is exactly
+    // when you least need it.
+    useEffect(() => {
+        // trackData carries the circuit rotation, so nothing may be fetched
+        // before it lands or the lap comes back unrotated.
+        if (comparing && trackData && !telemetry && !loadingReplay) {
+            setLoadingReplay(true);
+            loadReplay().finally(() => setLoadingReplay(false));
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [comparing, trackData, telemetry]);
 
     if (loading) {
         return <StageMessage variant="loading" title={raceName} />;
@@ -92,7 +196,7 @@ const TrackMap = ({ year, round, session, raceName }) => {
     }
     if (!mapLayout) return null;
 
-    const started = !!telemetry;
+    const started = hasPlayed;
     const finished = !isPlaying && sectorTimes.s3 != null;
     const drsCount = trackData?.drs_zones?.length || 0;
 
@@ -100,12 +204,22 @@ const TrackMap = ({ year, round, session, raceName }) => {
     const hudSpace = narrow ? 180 : 150;
     const traceH = narrow ? 56 : 76;
     const pedalH = narrow ? 46 : 60;   // full-height throttle needs the travel
+    const deltaH = narrow ? 40 : 52;
     const traceOpen = !!speedTrace && showTrace;
     // chart heights + the two label rows + the sector labels underneath
     const traceChrome = narrow ? 52 : 70;
-    const traceBlock = traceOpen
-        ? traceH + (speedTrace.pedal ? pedalH : 0) + traceChrome
-        : 0;
+    // Compare drops the speed chart entirely and stacks a pedal panel per
+    // driver, so the two layouts budget different things.
+    const comparePanels = comparing ? (compareTrace?.panels?.length || 0) : 0;
+    const showDeltaTrace = comparing && !!compareTrace?.deltaPath;
+    const labelRow = narrow ? 18 : 21;
+    const traceBlock = !traceOpen ? 0
+        : comparePanels
+            ? comparePanels * (pedalH + labelRow)
+                + (showDeltaTrace ? deltaH + labelRow : 0)
+                + (narrow ? 10 : 20)
+            // traceChrome already covers the two label rows and sector labels
+            : traceH + (speedTrace.pedal ? pedalH : 0) + traceChrome;
     const bottomSpace = hudSpace + traceBlock;
     // A reserved band for the transport. Floating it over the map meant it
     // landed on the track itself at circuits whose layout reaches the bottom of
@@ -122,6 +236,10 @@ const TrackMap = ({ year, round, session, raceName }) => {
     // its unusually wide 2.12 aspect. A horizontal strip across the top instead
     // would have cost ~11% on every track, so this is the cheaper reservation.
     const timingSpace = narrow ? 0 : 224;
+    // On desktop the delta panel lives in the reserved timing column, so it
+    // costs nothing. Narrow has no such column, so it takes a band of its own
+    // and the stage grows to match rather than the map shrinking.
+    const deltaSpace = (comparing && ghost && narrow) ? 86 : 0;
 
     // The stage GROWS by exactly the trace's height rather than the map giving
     // up space for it — so the track is the same size open or closed, and
@@ -131,10 +249,28 @@ const TrackMap = ({ year, round, session, raceName }) => {
         position: 'relative', width: '100%',
         // grows for BOTH the trace and the transport band, so the map's drawing
         // area is identical no matter what is open below it
-        height: `calc(${mapH}vh + ${traceBlock + transportSpace}px)`,
-        minHeight: (narrow ? 440 : 520) + traceBlock + transportSpace,
+        height: `calc(${mapH}vh + ${traceBlock + transportSpace + deltaSpace}px)`,
+        minHeight: (narrow ? 440 : 520) + traceBlock + transportSpace + deltaSpace,
         background: F1.bg, border: `1px solid ${F1.line}`,
         overflow: 'hidden', display: 'flex',
+    };
+
+    // A head-to-head can't start until BOTH laps are in hand: pressing play with
+    // only one loaded would replay the reference against nothing, and loading
+    // the second mid-lap is exactly the stutter this app exists to avoid.
+    const waitingForPick = comparing && !ghost && !ghostLoading;
+    const busy = loadingReplay || ghostLoading || (comparing && !telemetry);
+    const transport = {
+        busy,
+        disabled: busy || waitingForPick,
+        icon: (busy || waitingForPick) ? null
+            : isPlaying ? <Pause size={13} fill="currentColor" />
+                : <Play size={13} fill="currentColor" />,
+        label: waitingForPick ? 'SELECT A DRIVER'
+            : ghostLoading ? 'LOADING DRIVER…'
+                : busy ? 'LOADING LAP…'
+                    : isPlaying ? 'PAUSE'
+                        : !started ? 'START LAP' : finished ? 'REPLAY' : 'RESUME',
     };
 
     return (
@@ -152,12 +288,38 @@ const TrackMap = ({ year, round, session, raceName }) => {
                 }}>
                     {raceName || trackData?.circuit}
                 </span>
-                {!narrow && (
+                {!narrow && !comparing && (
                     <span style={{ fontSize: 11, color: F1.dim, letterSpacing: 1.2 }}>
                         {driver
                             ? `FASTEST LAP · ${driver.code} · ${driver.team}`.toUpperCase()
                             : 'FASTEST LAP OF THE SESSION'}
                     </span>
+                )}
+
+                {comparing && (
+                    <DriverPicker
+                        slot="a"
+                        value={driver?.number || ''}
+                        drivers={drivers}
+                        exclude={ghost?.number}
+                        color={driver?.color}
+                        loading={!driver}
+                        onChange={onPickDriver}
+                    />
+                )}
+
+                {comparing && (
+                    <DriverPicker
+                        slot="b"
+                        value={ghost?.number || ''}
+                        drivers={drivers}
+                        exclude={driver?.number}
+                        color={ghost?.color}
+                        loading={ghostLoading}
+                        placeholder="— compare a driver —"
+                        prefix="VS"
+                        onChange={onPickDriver}
+                    />
                 )}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
                     {mapLayout.speedSegments?.length > 0 && (
@@ -210,9 +372,11 @@ const TrackMap = ({ year, round, session, raceName }) => {
             {/* map + car — inset so nothing sits on top of the track */}
             <div style={{
                 position: 'absolute', left: timingSpace, right: 0,
-                top: narrow ? 90 : 46, bottom: mapBottom,
+                top: (narrow ? 90 : 46) + deltaSpace, bottom: mapBottom,
             }}>
-                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} />
+                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view}
+                    carColor={comparing ? (driver?.color || null) : null}
+                    ghostColor={comparing ? (ghost?.color || null) : null} />
             </div>
 
             {/* legend — desktop only, it crowds a phone */}
@@ -254,6 +418,24 @@ const TrackMap = ({ year, round, session, raceName }) => {
                     <SpeedTrace
                         ref={traceRef} trace={speedTrace} narrow={narrow}
                         height={traceH} pedalHeight={pedalH}
+                        compare={comparing ? compareTrace : null}
+                        deltaHeight={showDeltaTrace ? deltaH : 0}
+                    />
+                </div>
+            )}
+
+            {comparing && ghost && (
+                <div style={{
+                    position: 'absolute', zIndex: 13,
+                    ...(narrow
+                        ? { top: 92, left: 14, right: 14 }
+                        : { top: 244, left: 24, width: 190 }),
+                }}>
+                    <DeltaBar
+                        ref={deltaRef}
+                        reference={driver || null}
+                        ghost={ghost}
+                        narrow={narrow}
                     />
                 </div>
             )}
@@ -279,14 +461,14 @@ const TrackMap = ({ year, round, session, raceName }) => {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <button
                         onClick={isPlaying ? pause : handleStart}
-                        disabled={loadingReplay}
-                        style={{ ...btn, opacity: loadingReplay ? 0.6 : 1, cursor: loadingReplay ? 'wait' : 'pointer' }}
+                        disabled={transport.disabled}
+                        style={{
+                            ...btn,
+                            opacity: transport.disabled ? 0.55 : 1,
+                            cursor: transport.busy ? 'wait' : transport.disabled ? 'not-allowed' : 'pointer',
+                        }}
                     >
-                        {loadingReplay
-                            ? 'LOADING LAP…'
-                            : isPlaying
-                                ? <><Pause size={13} fill="currentColor" /> PAUSE</>
-                                : <><Play size={13} fill="currentColor" /> {!started ? 'START LAP' : finished ? 'REPLAY' : 'RESUME'}</>}
+                        {transport.icon}{transport.label}
                     </button>
                     {started && !isPlaying && !finished && (
                         <button onClick={restart} style={ghost} title="Restart lap">

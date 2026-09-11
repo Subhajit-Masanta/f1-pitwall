@@ -1,22 +1,160 @@
 /**
- * 📄 SpeedTrace.jsx — speed against lap distance, with a playhead that tracks
- * the car.
+ * 📄 SpeedTrace.jsx — the chart stack under the map.
  *
- * Same two-layer trick as the track map: the trace itself is a static SVG
- * promoted to its own compositor layer, and the playhead is a separate absolutely
- * positioned element moved with translate3d. Nothing re-renders in React while
- * the lap plays — the parent calls `update(frame)` and we write to the DOM.
+ * Two layouts, one component:
+ *
+ *   SOLO     speed against distance, then the pedals.
+ *   COMPARE  no speed chart at all — one pedal panel per driver in their own
+ *            team colour, then the delta. Comparing is about what the two
+ *            drivers DID with the car; a single shared speed line answered a
+ *            different question and cost the room these panels need.
+ *
+ * Same two-layer trick throughout: every chart is a static SVG promoted to its
+ * own compositor layer, and each playhead is a separate absolutely positioned
+ * element moved with translate3d. Nothing re-renders in React while the lap
+ * plays — the parent calls `update(frame)` and we write to the DOM.
  */
 import React, {
     forwardRef, useImperativeHandle, useRef, useEffect, useCallback,
 } from 'react';
 import { F1, MONO } from '../theme';
 
-const SpeedTrace = forwardRef(({ trace, narrow, height, pedalHeight }, ref) => {
+const Row = ({ left, right, mt = 7, mb = 4 }) => (
+    <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginTop: mt, marginBottom: mb, gap: 10,
+    }}>
+        {left}
+        {right}
+    </div>
+);
+
+const Label = ({ children }) => (
+    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
+        {children}
+    </span>
+);
+
+const Mono = ({ children }) => (
+    <span style={{ fontFamily: MONO, fontSize: 10, color: F1.dim }}>{children}</span>
+);
+
+const Swatch = ({ color, label }) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 12, height: 2, background: color }} />
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
+            {label}
+        </span>
+    </span>
+);
+
+const SectorLabels = ({ sectorX, W }) => (
+    <div style={{
+        position: 'relative', height: 14, marginTop: 3,
+        fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim,
+    }}>
+        {['S1', 'S2', 'S3'].map((lbl, i) => {
+            const startPct = i === 0 ? 0 : (sectorX[i - 1] / W) * 100;
+            return (
+                <span key={lbl} style={{
+                    position: 'absolute', left: `${startPct}%`, paddingLeft: 4,
+                    color: [F1.s1, F1.s2, F1.s3][i],
+                }}>
+                    {lbl}
+                </span>
+            );
+        })}
+    </div>
+);
+
+const Playhead = ({ headRef }) => (
+    <div ref={headRef} style={{
+        position: 'absolute', left: 0, top: 0, width: 1, height: '100%',
+        background: F1.red, opacity: 0, willChange: 'transform',
+        pointerEvents: 'none',
+    }} />
+);
+
+/** One driver's pedals: throttle line in their team colour, braking as peaks. */
+const PedalPanel = ({ geom, title, subtitle, color, height, sectorX, headRef, first, dashed }) => {
+    const { W, H } = geom;
+    return (
+        <>
+            <Row
+                mt={first ? 0 : 9}
+                left={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{
+                            width: 3, height: 12, background: color,
+                            backgroundImage: dashed
+                                ? `repeating-linear-gradient(180deg, ${color} 0 3px, rgba(0,0,0,0.6) 3px 5px)`
+                                : 'none',
+                        }} />
+                        <span style={{
+                            fontFamily: MONO, fontSize: 11, fontWeight: 700,
+                            letterSpacing: 0.6, color: F1.text,
+                        }}>
+                            {title}
+                        </span>
+                        {subtitle && <Label>{subtitle.toUpperCase()}</Label>}
+                    </span>
+                }
+                right={<Mono>PEAK {geom.peakG.toFixed(1)}G</Mono>}
+            />
+
+            <div style={{ position: 'relative', width: '100%', height }}>
+                <svg
+                    width="100%" height={height} viewBox={`0 0 ${W} ${H}`}
+                    preserveAspectRatio="none"
+                    style={{
+                        position: 'absolute', inset: 0, display: 'block',
+                        willChange: 'transform', transform: 'translateZ(0)',
+                    }}
+                >
+                    {sectorX.map((sx, i) => (
+                        <line key={i} x1={sx} y1={0} x2={sx} y2={H}
+                            stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.5"
+                            strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    ))}
+
+                    {/* Braking stays red in every panel — it means the same thing
+                        for everyone, and the driver's identity is carried by the
+                        throttle line.
+
+                        It is a FILLED MASS with no outline; throttle is the
+                        only stroked line in the panel. Two red teams exist
+                        (Ferrari #F91536, Alfa #C92D4B), and an outlined brake
+                        shape next to a red throttle line reads as one blob —
+                        fill-versus-stroke separates them for any team colour. */}
+                    {geom.brakeShapes.map((b, i) => (
+                        <path key={i} d={b.area} fill={F1.red} fillOpacity="0.38" />
+                    ))}
+
+                    <path d={geom.throttlePath} fill="none" stroke={color}
+                        strokeWidth={2.2} strokeLinejoin="round"
+                        strokeDasharray={dashed ? '6 3' : undefined}
+                        vectorEffect="non-scaling-stroke" />
+                </svg>
+
+                <div style={{
+                    position: 'absolute', left: 0, right: 0, bottom: 0, height: 1,
+                    background: F1.line, pointerEvents: 'none',
+                }} />
+                <Playhead headRef={headRef} />
+            </div>
+        </>
+    );
+};
+
+const SpeedTrace = forwardRef(({
+    trace, narrow, height, pedalHeight, compare = null, deltaHeight = 0,
+}, ref) => {
     const wrapRef = useRef(null);
     const headRef = useRef(null);
     const dotRef = useRef(null);
     const pedalHeadRef = useRef(null);
+    const deltaHeadRef = useRef(null);
+    const panelHeads = useRef([]);
     const widthRef = useRef(0);
 
     const measure = useCallback(() => {
@@ -34,91 +172,140 @@ const SpeedTrace = forwardRef(({ trace, narrow, height, pedalHeight }, ref) => {
         update(fr) {
             if (!trace) return;
             const w = widthRef.current;
-            const h = height;
             const frac = Math.max(0, Math.min(1, fr.dist / trace.total));
-            if (headRef.current) {
-                headRef.current.style.transform = `translate3d(${(frac * w).toFixed(2)}px,0,0)`;
-                headRef.current.style.opacity = '1';
+            const px = (frac * w).toFixed(2);
+
+            // every chart shares the distance axis, so one x serves them all
+            const move = (el) => {
+                if (!el) return;
+                el.style.transform = `translate3d(${px}px,0,0)`;
+                el.style.opacity = '1';
+            };
+
+            if (compare?.panels) {
+                panelHeads.current.forEach(move);
+                move(deltaHeadRef.current);
+                return;
             }
+
+            move(headRef.current);
+            move(pedalHeadRef.current);
             if (dotRef.current) {
-                const yPx = h - (Math.min(fr.speed, trace.maxS) / trace.maxS) * h;
-                dotRef.current.style.transform =
-                    `translate3d(${(frac * w).toFixed(2)}px, ${yPx.toFixed(2)}px, 0)`;
+                const yPx = height - (Math.min(fr.speed, trace.maxS) / trace.maxS) * height;
+                dotRef.current.style.transform = `translate3d(${px}px, ${yPx.toFixed(2)}px, 0)`;
                 dotRef.current.style.opacity = '1';
             }
-            // pedal band shares the distance axis, so the same x carries over
-            if (pedalHeadRef.current) {
-                pedalHeadRef.current.style.transform = `translate3d(${(frac * w).toFixed(2)}px,0,0)`;
-                pedalHeadRef.current.style.opacity = '1';
-            }
         },
-    }), [trace, height]);
+    }), [trace, height, compare]);
 
     if (!trace) return null;
     const { line, area, W, H, sectorX, drsBars, brakePaths, maxS, pedal } = trace;
 
-    return (
-        <div style={{ width: '100%' }}>
-            {/* label row — real layout space so nothing overlaps the chart */}
-            <div style={{
-                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                marginBottom: 5,
-            }}>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
-                    SPEED
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    {brakePaths?.length > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <span style={{ width: 12, height: 2, background: F1.red }} />
-                            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
-                                BRAKING
-                            </span>
-                        </span>
-                    )}
-                    {drsBars?.length > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <span style={{ width: 12, height: 2, background: F1.drs }} />
-                            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
-                                DRS
-                            </span>
-                        </span>
-                    )}
-                    <span style={{ fontFamily: MONO, fontSize: 10, color: F1.dim }}>
-                        {Math.round(maxS)} km/h
-                    </span>
-                </div>
-            </div>
+    // ---- COMPARE: one pedal panel per driver, then the delta ---------------
+    if (compare?.panels) {
+        return (
+            <div ref={wrapRef} style={{ width: '100%' }}>
+                {compare.panels.map((p, i) => (
+                    <PedalPanel
+                        key={`${p.code}-${i}`}
+                        geom={p.geom}
+                        title={p.code}
+                        subtitle={p.team}
+                        color={p.color}
+                        // Team-mates share a team colour (VER and PER are both
+                        // #3671C6), so the second one is broken up to stay
+                        // distinguishable in an intra-team battle.
+                        dashed={i > 0 && p.color === compare.panels[0].color}
+                        first={i === 0}
+                        height={pedalHeight}
+                        sectorX={sectorX}
+                        headRef={(el) => { panelHeads.current[i] = el; }}
+                    />
+                ))}
 
-            <div ref={wrapRef} style={{ position: 'relative', width: '100%', height }}>
+                {deltaHeight > 0 && compare.deltaPath && (
+                    <>
+                        <Row
+                            mt={9}
+                            left={<Label>DELTA</Label>}
+                            right={
+                                <Mono>
+                                    ±{compare.deltaMax.toFixed(1)}s · {compare.code} above the line is
+                                    {' '}<span style={{ color: F1.red }}>losing</span>,
+                                    {' '}below is <span style={{ color: F1.green }}>gaining</span>
+                                </Mono>
+                            }
+                        />
+                        <div style={{ position: 'relative', width: '100%', height: deltaHeight }}>
+                            <svg
+                                width="100%" height={deltaHeight}
+                                viewBox={`0 0 ${W} ${compare.DH}`} preserveAspectRatio="none"
+                                style={{
+                                    position: 'absolute', inset: 0, display: 'block',
+                                    willChange: 'transform', transform: 'translateZ(0)',
+                                }}
+                            >
+                                {sectorX.map((sx, i) => (
+                                    <line key={i} x1={sx} y1={0} x2={sx} y2={compare.DH}
+                                        stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.5"
+                                        strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                                ))}
+                                <path d={compare.deltaArea} fill={compare.color} fillOpacity="0.16" />
+                                <path d={compare.deltaPath} fill="none" stroke={compare.color}
+                                    strokeWidth={1.75} strokeLinejoin="round"
+                                    vectorEffect="non-scaling-stroke" />
+                                <line x1={0} y1={compare.DH / 2} x2={W} y2={compare.DH / 2}
+                                    stroke={F1.dim} strokeOpacity="0.55" strokeWidth={1}
+                                    strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+                            </svg>
+                            <Playhead headRef={deltaHeadRef} />
+                        </div>
+                    </>
+                )}
+
+                {!narrow && sectorX.length === 2 && <SectorLabels sectorX={sectorX} W={W} />}
+            </div>
+        );
+    }
+
+    // ---- SOLO: speed, then pedals -----------------------------------------
+    return (
+        <div ref={wrapRef} style={{ width: '100%' }}>
+            <Row
+                mt={0} mb={5}
+                left={<Label>SPEED</Label>}
+                right={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {brakePaths?.length > 0 && <Swatch color={F1.red} label="BRAKING" />}
+                        {drsBars?.length > 0 && <Swatch color={F1.drs} label="DRS" />}
+                        <Mono>{Math.round(maxS)} km/h</Mono>
+                    </div>
+                }
+            />
+
+            <div style={{ position: 'relative', width: '100%', height }}>
                 <svg
                     width="100%" height={height} viewBox={`0 0 ${W} ${H}`}
                     preserveAspectRatio="none"
                     style={{
                         position: 'absolute', inset: 0, display: 'block',
-                        // rasterise once — the playhead moves on its own layer
                         willChange: 'transform', transform: 'translateZ(0)',
                     }}
                 >
-                    {/* DRS zones, as a band along the floor */}
                     {drsBars.map((z, i) => (
                         <rect key={i} x={z.x1} y={H - 3} width={z.x2 - z.x1} height={3}
                             fill={F1.drs} opacity="0.85" />
                     ))}
-
-                    {/* sector divisions */}
                     {sectorX.map((sx, i) => (
                         <line key={i} x1={sx} y1={0} x2={sx} y2={H}
                             stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.5"
                             strokeWidth={1} vectorEffect="non-scaling-stroke" />
                     ))}
 
-                    {/* the trace */}
                     <path d={area} fill={F1.text} opacity="0.05" />
                     <path d={line} fill="none" stroke={F1.text} strokeWidth={1.5}
                         strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
 
-                    {/* braking — drawn last so it sits on top of the white line */}
                     {brakePaths?.map((d, i) => (
                         <path key={i} d={d} fill="none" stroke={F1.red} strokeWidth={2.5}
                             strokeLinecap="round" strokeLinejoin="round"
@@ -126,12 +313,7 @@ const SpeedTrace = forwardRef(({ trace, narrow, height, pedalHeight }, ref) => {
                     ))}
                 </svg>
 
-                {/* playhead — own layer, moved imperatively */}
-                <div ref={headRef} style={{
-                    position: 'absolute', left: 0, top: 0, width: 1, height: '100%',
-                    background: F1.red, opacity: 0, willChange: 'transform',
-                    pointerEvents: 'none',
-                }} />
+                <Playhead headRef={headRef} />
                 <div ref={dotRef} style={{
                     position: 'absolute', left: 0, top: 0, width: 0, height: 0,
                     opacity: 0, willChange: 'transform', pointerEvents: 'none',
@@ -143,111 +325,29 @@ const SpeedTrace = forwardRef(({ trace, narrow, height, pedalHeight }, ref) => {
                         background: F1.red, border: '1.5px solid #fff',
                     }} />
                 </div>
-
-                {/* baseline */}
                 <div style={{
                     position: 'absolute', left: 0, right: 0, bottom: 0, height: 1,
                     background: F1.line, pointerEvents: 'none',
                 }} />
             </div>
 
-            {/* ---- pedals: throttle up, brake down, mirrored ---------------- */}
             {pedal && (
-                <>
-                    <div style={{
-                        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                        marginTop: 7, marginBottom: 4,
-                    }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
-                            PEDALS
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span style={{ width: 12, height: 2, background: F1.drs }} />
-                                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
-                                    THROTTLE
-                                </span>
-                            </span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span style={{ width: 12, height: 2, background: F1.red }} />
-                                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim }}>
-                                    BRAKE · PEAK {pedal.peakG.toFixed(1)}G
-                                </span>
-                            </span>
-                        </div>
-                    </div>
-
-                    <div style={{ position: 'relative', width: '100%', height: pedalHeight }}>
-                        <svg
-                            width="100%" height={pedalHeight}
-                            viewBox={`0 0 ${pedal.W} ${pedal.H}`} preserveAspectRatio="none"
-                            style={{
-                                position: 'absolute', inset: 0, display: 'block',
-                                willChange: 'transform', transform: 'translateZ(0)',
-                            }}
-                        >
-                            {/* sector divisions, carried down so the two charts read as one */}
-                            {pedal.sectorX.map((sx, i) => (
-                                <line key={i} x1={sx} y1={0} x2={sx} y2={pedal.H}
-                                    stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.5"
-                                    strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            ))}
-
-                            {/* Braking — filled, because it's zero for most of a lap,
-                                so the fill reads as peaks rather than mass. The
-                                spike-then-bleed shape inside each zone is the real
-                                trail-braking profile, not a 100% block. */}
-                            {pedal.brakeShapes.map((b, i) => (
-                                <g key={i}>
-                                    <path d={b.area} fill={F1.red} fillOpacity="0.30" />
-                                    <path d={b.line} fill="none" stroke={F1.red}
-                                        strokeWidth={1.75} strokeLinejoin="round"
-                                        vectorEffect="non-scaling-stroke" />
-                                </g>
-                            ))}
-
-                            {/* Throttle — line only, no fill. The trace sits at 100%
-                                for ~70% of a qualifying lap, so ANY fill under it
-                                covers most of a 60px band and reads as a slab. */}
-                            <path d={pedal.throttleLine} fill="none" stroke={F1.drs}
-                                strokeWidth={2} strokeLinejoin="round"
-                                vectorEffect="non-scaling-stroke" />
-                        </svg>
-
-                        {/* floor, matching the speed chart's baseline */}
-                        <div style={{
-                            position: 'absolute', left: 0, right: 0, bottom: 0, height: 1,
-                            background: F1.line, pointerEvents: 'none',
-                        }} />
-
-                        <div ref={pedalHeadRef} style={{
-                            position: 'absolute', left: 0, top: 0, width: 1, height: '100%',
-                            background: F1.red, opacity: 0, willChange: 'transform',
-                            pointerEvents: 'none',
-                        }} />
-                    </div>
-                </>
+                <PedalPanel
+                    geom={{
+                        W: pedal.W, H: pedal.H,
+                        throttlePath: pedal.throttleLine,
+                        brakeShapes: pedal.brakeShapes,
+                        peakG: pedal.peakG,
+                    }}
+                    title="PEDALS"
+                    color={F1.drs}
+                    height={pedalHeight}
+                    sectorX={sectorX}
+                    headRef={(el) => { pedalHeadRef.current = el; }}
+                />
             )}
 
-            {/* sector labels under the axis */}
-            {!narrow && sectorX.length === 2 && (
-                <div style={{
-                    position: 'relative', height: 14, marginTop: 3,
-                    fontSize: 9, fontWeight: 700, letterSpacing: 1, color: F1.dim,
-                }}>
-                    {['S1', 'S2', 'S3'].map((lbl, i) => {
-                        const startPct = i === 0 ? 0 : (sectorX[i - 1] / W) * 100;
-                        return (
-                            <span key={lbl} style={{
-                                position: 'absolute', left: `${startPct}%`, paddingLeft: 4,
-                                color: [F1.s1, F1.s2, F1.s3][i],
-                            }}>
-                                {lbl}
-                            </span>
-                        );
-                    })}
-                </div>
-            )}
+            {!narrow && sectorX.length === 2 && <SectorLabels sectorX={sectorX} W={W} />}
         </div>
     );
 });

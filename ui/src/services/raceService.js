@@ -15,6 +15,10 @@ export const raceService = {
     getTrackData: async (year, round, session) =>
         (await api.get(`/track/${year}/${round}/${session}`)).data,
 
+    /** Everyone who set a lap, ordered by their fastest — the head-to-head picker. */
+    getDrivers: async (year, round, session) =>
+        (await api.get(`/drivers/${year}/${round}/${session}`)).data,
+
     /** Lap telemetry. Pass 'fastest' to get whoever set the quickest lap. */
     getTelemetry: async (year, round, session, driverId = 'fastest') =>
         (await api.get(`/telemetry/${year}/${round}/${session}/${driverId}`)).data,

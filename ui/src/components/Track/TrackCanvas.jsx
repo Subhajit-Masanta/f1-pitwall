@@ -15,9 +15,10 @@ import React, {
 } from 'react';
 import { F1, MONO, speedColor } from '../../theme';
 
-const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
+const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', carColor = null, ghostColor = null }, ref) => {
     const wrapRef = useRef(null);
     const carRef = useRef(null);
+    const ghostRef = useRef(null);
     const proj = useRef({ scale: 1, offX: 0, offY: 0 });
     // Last position in TRACK units, so a resize can re-project the car. Without
     // this the parked car keeps the pixel position from the old projection and
@@ -51,7 +52,22 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
         car.style.opacity = '1';
     }, []);
 
-    useImperativeHandle(ref, () => ({ moveCar: placeCar }), [placeCar]);
+    /** Same projection, second marker. Null hides it. */
+    const placeGhost = useCallback((x, y) => {
+        const g = ghostRef.current;
+        if (!g) return;
+        if (x == null || !Number.isFinite(x) || !Number.isFinite(y)) {
+            g.style.opacity = '0';
+            return;
+        }
+        const { scale, offX, offY } = proj.current;
+        g.style.transform =
+            `translate3d(${(x * scale + offX).toFixed(3)}px, ${(y * scale + offY).toFixed(3)}px, 0)`;
+        g.style.opacity = '1';
+    }, []);
+
+    useImperativeHandle(ref, () => ({ moveCar: placeCar, moveGhost: placeGhost }),
+        [placeCar, placeGhost]);
 
     useEffect(() => {
         const apply = () => {
@@ -158,8 +174,32 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
                 <Tick t={ticks.start} color="#FFFFFF" />
             </svg>
 
-            {/* moving car — own GPU layer */}
+            {/* moving cars — own GPU layer. Ghost first so the reference lap's
+                marker always stays on top when they overlap. */}
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+                {ghostColor && (
+                    <div ref={ghostRef} style={{
+                        position: 'absolute', top: 0, left: 0, width: 0, height: 0,
+                        willChange: 'transform', opacity: 0,
+                    }}>
+                        <div style={{
+                            position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
+                            width: 22, height: 22, borderRadius: '50%',
+                            background: `radial-gradient(circle, ${ghostColor}55 0%, ${ghostColor}00 70%)`,
+                        }} />
+                        {/* A HOLLOW ring, not a filled dot. The reference car is
+                            always F1 red, and a team colour can sit right on top
+                            of it (Ferrari is #F91536) — so the two are told apart
+                            by shape, which survives any colour pairing. */}
+                        <div style={{
+                            position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
+                            width: 13, height: 13, borderRadius: '50%',
+                            background: 'rgba(11,11,15,0.55)',
+                            border: `2.5px solid ${ghostColor}`,
+                            boxShadow: '0 0 0 1px rgba(255,255,255,0.35)',
+                        }} />
+                    </div>
+                )}
                 <div ref={carRef} style={{
                     position: 'absolute', top: 0, left: 0, width: 0, height: 0,
                     willChange: 'transform', opacity: 0,
@@ -167,12 +207,17 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
                     <div style={{
                         position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
                         width: 26, height: 26, borderRadius: '50%',
-                        background: 'radial-gradient(circle, rgba(225,6,0,0.45) 0%, rgba(225,6,0,0) 70%)',
+                        background: carColor
+                            ? `radial-gradient(circle, ${carColor}55 0%, ${carColor}00 70%)`
+                            : 'radial-gradient(circle, rgba(225,6,0,0.45) 0%, rgba(225,6,0,0) 70%)',
                     }} />
+                    {/* Solid disc. The compared car is a hollow ring, so the two
+                        stay apart by SHAPE even when both drivers are in the same
+                        team and share one colour. */}
                     <div style={{
                         position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
                         width: 11, height: 11, borderRadius: '50%',
-                        background: F1.red, border: '1.5px solid #fff',
+                        background: carColor || F1.red, border: '1.5px solid #fff',
                     }} />
                 </div>
             </div>

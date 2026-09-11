@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { raceService } from '../services/raceService';
+import { buildGhost } from '../lib/ghost';
 
 /** Turn an axios failure into something a person can read. */
 const friendlyError = (err) => {
@@ -30,13 +31,76 @@ const applyRotation = (x, y, angleDeg) => {
     return { x: x * cos - y * sin, y: x * sin + y * cos };
 };
 
-export const useOfficialRaceData = (year, round, session) => {
+/** Rotate a telemetry frame list onto the circuit's official orientation. */
+const rotateFrames = (frames, angle) => frames.map((p) => {
+    const r = applyRotation(p.x, p.y, angle);
+    return { ...p, x: r.x, y: r.y };
+});
+
+/**
+ * Pedal geometry for ONE driver, from their own telemetry channels.
+ *
+ * Both sides of a head-to-head go through this same function so neither gets a
+ * flattering treatment: same sampling, same scales, same brake definition.
+ *
+ * Braking is deceleration gated by the pedal flag — FastF1's Brake channel is
+ * boolean, so it says whether the pedal is down but not how hard; the g channel
+ * supplies the magnitude that gives the spike-then-bleed shape.
+ */
+const buildPedalGeom = (arrays, W) => {
+    if (!arrays) return null;
+    const { d, thr, brk, gl } = arrays;
+    const n = d.length;
+    if (n < 2) return null;
+
+    const total = d[n - 1] || 1;
+    const PH = 100, PAD = 2;
+    const x = (i) => (d[i] / total) * W;
+    const yT = (v) => PAD + (1 - Math.max(0, Math.min(100, v)) / 100) * (PH - PAD * 2);
+
+    let peakG = 0;
+    for (let i = 0; i < n; i++) {
+        if (brk[i] && -gl[i] > peakG) peakG = -gl[i];
+    }
+    peakG = peakG || 5;
+
+    const step = Math.max(1, Math.floor(n / 600));
+    const tp = [];
+    for (let i = 0; i < n; i += step) tp.push(`${x(i).toFixed(1)},${yT(thr[i]).toFixed(1)}`);
+    const throttlePath = `M ${tp.join(' L ')}`;
+
+    // one filled shape per braking event, so the fill reads as discrete peaks
+    const shapes = [];
+    let i = 0;
+    while (i < n) {
+        if (!brk[i]) { i++; continue; }
+        let j = i;
+        while (j + 1 < n && brk[j + 1]) j++;
+        if (j - i >= 1) {
+            const body = [];
+            for (let k = i; k <= j; k++) {
+                const inten = Math.min(1, Math.max(0, -gl[k]) / peakG);
+                body.push(`${x(k).toFixed(1)},${yT(inten * 100).toFixed(1)}`);
+            }
+            const line = `M ${x(i).toFixed(1)},${PH} L ${body.join(' L ')} L ${x(j).toFixed(1)},${PH}`;
+            shapes.push({ line, area: `${line} Z` });
+        }
+        i = j + 1;
+    }
+
+    return { throttlePath, brakeShapes: shapes, peakG, W, H: PH };
+};
+
+export const useOfficialRaceData = (year, round, session, referenceDriver = null) => {
     const [trackData, setTrackData] = useState(null);
     const [telemetry, setTelemetry] = useState(null);
     const [loading, setLoading] = useState(true);
     const [sectorBoundaries, setSectorBoundaries] = useState(null);
     const [officialSectorTimes, setOfficialSectorTimes] = useState(null);
     const [driver, setDriver] = useState(null);
+    const [drivers, setDrivers] = useState([]);          // head-to-head picker
+    const [ghost, setGhost] = useState(null);            // the compared driver
+    const [ghostLoading, setGhostLoading] = useState(false);
     const [error, setError] = useState(null);        // track-load failure/empty
     const [replayError, setReplayError] = useState(null);  // telemetry-load failure/empty
     const [reloadKey, setReloadKey] = useState(0);
@@ -51,6 +115,8 @@ export const useOfficialRaceData = (year, round, session) => {
         setSectorBoundaries(null);
         setOfficialSectorTimes(null);
         setDriver(null);
+        setDrivers([]);
+        setGhost(null);
         setError(null);
         setReplayError(null);
         setLoading(true);
@@ -100,28 +166,31 @@ export const useOfficialRaceData = (year, round, session) => {
     // 2. Fetch the fastest-lap telemetry (on demand) and pre-rotate it.
     const loadReplay = useCallback(async () => {
         if (telemetry) return true;
+        // Rotation lives on trackData. Fetching before it lands silently yields
+        // an UNROTATED lap — the car then drives a path rotated away from the
+        // circuit and appears off-track. Refuse rather than produce that.
+        if (!trackData) return false;
         setReplayError(null);
         try {
-            // 'fastest' = whoever set the quickest lap of this session.
-            const data = await raceService.getTelemetry(year, round, session || 'R', 'fastest');
+            // The reference is whoever was picked; 'fastest' (the session's
+            // quickest) is the default when no one has been chosen yet.
+            const data = await raceService.getTelemetry(
+                year, round, session || 'R', referenceDriver || 'fastest',
+            );
             if (data.error || !data.telemetry) {
                 setReplayError(data.error || 'This session has no lap telemetry to replay.');
                 return false;
             }
             setDriver({
+                number: String(data.driver),
                 code: data.driver_code,
                 name: data.driver_name,
                 team: data.team,
-                lapTime: data.lap_time,
+                color: data.team_color || '#9E9E9E',
+                lapTime: data.lap_seconds,
             });
 
-            const angle = trackData?.rotation || 0;
-            const rotated = data.telemetry.map((p) => {
-                const r = applyRotation(p.x, p.y, angle);
-                return { ...p, x: r.x, y: r.y };
-            });
-
-            setTelemetry(rotated);
+            setTelemetry(rotateFrames(data.telemetry, trackData.rotation || 0));
             // Prefer the boundaries we already have from the track call; fall back
             // to the telemetry call's own analysis.
             if (!sectorBoundaries && data.sector_boundaries) setSectorBoundaries(data.sector_boundaries);
@@ -132,7 +201,66 @@ export const useOfficialRaceData = (year, round, session) => {
             setReplayError(friendlyError(err));
             return false;
         }
-    }, [telemetry, trackData, sectorBoundaries, year, round, session]);
+    }, [telemetry, trackData, sectorBoundaries, year, round, session, referenceDriver]);
+
+    // 2b. Who else was out there — fetched with the circuit so the picker is
+    //     populated before anyone presses play.
+    useEffect(() => {
+        if (!year || !round) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await raceService.getDrivers(year, round, session || 'R');
+                if (cancelled || data.error) return;
+                setDrivers(data.drivers || []);
+            } catch (err) {
+                // A missing driver list only costs the compare picker, so it
+                // must never take the replay down with it.
+                console.warn('Driver list unavailable', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [year, round, session, reloadKey]);
+
+    /**
+     * Load (or clear) the driver being compared against. Pass null to clear.
+     * The ghost is a plain object, not React state on the hot path — the loop
+     * reads it every frame and never re-renders.
+     */
+    const loadGhost = useCallback(async (number) => {
+        if (!number) { setGhost(null); return true; }
+        if (!trackData) return false;      // same rotation dependency as above
+        setGhostLoading(true);
+        try {
+            const data = await raceService.getTelemetry(year, round, session || 'R', number);
+            if (data.error || !data.telemetry) {
+                setGhost(null);
+                return false;
+            }
+            const meta = drivers.find((d) => d.number === String(number));
+            const built = buildGhost(
+                rotateFrames(data.telemetry, trackData.rotation || 0),
+                {
+                    number: String(number),
+                    code: data.driver_code,
+                    name: data.driver_name,
+                    team: data.team,
+                    color: data.team_color || meta?.color || '#9E9E9E',
+                    // lap_time is a formatted string; lap_seconds is the number
+                    lapTime: data.lap_seconds,
+                    gap: meta?.gap,
+                },
+            );
+            setGhost(built);
+            return !!built;
+        } catch (err) {
+            console.error('Failed to load comparison driver', err);
+            setGhost(null);
+            return false;
+        } finally {
+            setGhostLoading(false);
+        }
+    }, [year, round, session, trackData, drivers]);
 
     // 3. Everything geometric the map needs, derived once per track.
     const mapLayout = useMemo(() => {
@@ -414,10 +542,69 @@ export const useOfficialRaceData = (year, round, session) => {
         return { line, area, W, H, total, maxS, minS, sectorX, drsBars, brakePaths, pedal };
     }, [trackData, sectorBoundaries]);
 
+    // 5. Head-to-head geometry: the ghost's traces drawn over the reference's,
+    //    plus the delta across the whole lap.
+    //
+    //    Both drivers are plotted against their OWN lap fraction rather than
+    //    absolute metres — their laps don't measure identically, and fraction is
+    //    what makes the delta land on the official gap at the flag.
+    const refLookup = useMemo(
+        () => (telemetry?.length ? buildGhost(telemetry, {}) : null),
+        [telemetry],
+    );
+
+    const compareTrace = useMemo(() => {
+        if (!ghost?.arrays || !refLookup?.arrays || !speedTrace) return null;
+        const { W } = speedTrace;
+
+        // Both panels come from the SAME builder and the same channels, so
+        // neither driver gets a different treatment.
+        const a = buildPedalGeom(refLookup.arrays, W);
+        const b = buildPedalGeom(ghost.arrays, W);
+        if (!a || !b) return null;
+
+        // Delta across the lap, sampled evenly in lap fraction.
+        const N = 400;
+        const vals = new Float64Array(N + 1);
+        let deltaMax = 0;
+        for (let i = 0; i <= N; i++) {
+            const f = i / N;
+            vals[i] = ghost.timeAtFraction(f) - refLookup.timeAtFraction(f);
+            const m = Math.abs(vals[i]);
+            if (m > deltaMax) deltaMax = m;
+        }
+        deltaMax = Math.max(0.1, Math.ceil(deltaMax * 10) / 10);
+
+        const DH = 100, DPAD = 6;
+        const half = DH / 2 - DPAD;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+            const x = ((i / N) * W).toFixed(1);
+            // positive (the compared driver losing) rises above the centre line
+            const y = (DH / 2 - (vals[i] / deltaMax) * half).toFixed(1);
+            pts.push(`${x},${y}`);
+        }
+        const deltaPath = `M ${pts.join(' L ')}`;
+
+        return {
+            panels: [
+                { code: driver?.code || 'REF', team: driver?.team, color: driver?.color || '#9E9E9E', geom: a },
+                { code: ghost.code, team: ghost.team, color: ghost.color, geom: b },
+            ],
+            deltaPath,
+            deltaArea: `${deltaPath} L ${W},${DH / 2} L 0,${DH / 2} Z`,
+            deltaMax,
+            DH,
+            code: ghost.code,
+            color: ghost.color,
+        };
+    }, [ghost, speedTrace, refLookup, driver]);
+
     return {
         trackData,
         mapLayout,
         speedTrace,
+        compareTrace,
         telemetry,
         loading,
         error,
@@ -427,5 +614,9 @@ export const useOfficialRaceData = (year, round, session) => {
         sectorBoundaries,
         officialSectorTimes,
         driver,
+        drivers,
+        ghost,
+        ghostLoading,
+        loadGhost,
     };
 };
