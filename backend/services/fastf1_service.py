@@ -155,7 +155,15 @@ def get_race_sessions(year: int, race_round: int):
 # Bump this whenever the SHAPE of a cached payload changes, so stale entries
 # from an older schema are ignored instead of silently served.
 #   v2 — added per-point speed ("S") to track_points for the speed-coloured line
-CACHE_SCHEMA = "v2"
+#   v3 — added brake_zones (distance ranges where the driver was on the brakes)
+#   v4 — added per-point throttle ("T") to track_points for the pedal trace
+#   v5 — added longitudinal g ("A") + peak_decel_g: real braking magnitude,
+#        because FastF1's Brake channel is boolean and has none
+#   v6 — per-point D is now the TRUE Distance at that point on the line, not
+#        arc-length scaled proportionally (they drift up to 33m apart)
+#   v7 — invalidates v6: those entries were written while the car's position
+#        mapping was briefly (and wrongly) inverted rather than pro-rata
+CACHE_SCHEMA = "v7"
 
 # How many points to send for the static track outline.
 TRACK_OUTLINE_POINTS = 500
@@ -175,17 +183,20 @@ def _racing_line(tel, smooth_window: int = 3):
     Distance channel, gives motion whose speed tracks the real telemetry speed
     to r > 0.99.
 
-    Returns (s_grid, x_grid, y_grid, speed_grid, total_length) — X/Y in FastF1
-    units (tenths of a metre), speed in km/h, s_grid evenly spaced from 0 to
-    total_length.
+    Returns (s_grid, x_grid, y_grid, chans, total_length) — X/Y in FastF1 units
+    (tenths of a metre), s_grid evenly spaced from 0 to total_length, and
+    `chans` a dict of per-point driver channels resampled onto the same grid:
+    "S" speed (km/h) and "T" throttle (0-100).
     """
     x = tel["X"].to_numpy().astype(float)
     y = tel["Y"].to_numpy().astype(float)
     spd = np.nan_to_num(tel["Speed"].to_numpy().astype(float))
+    thr = np.nan_to_num(tel["Throttle"].to_numpy().astype(float))
+    dist = tel["Distance"].to_numpy().astype(float)
 
     # Drop consecutive duplicate positions (car "parked" in the raw data).
     keep = np.r_[True, (np.diff(x) != 0) | (np.diff(y) != 0)]
-    x, y, spd = x[keep], y[keep], spd[keep]
+    x, y, spd, thr, dist = x[keep], y[keep], spd[keep], thr[keep], dist[keep]
 
     # Light moving-average to take the edge off GPS jitter.
     w = smooth_window
@@ -199,19 +210,66 @@ def _racing_line(tel, smooth_window: int = 3):
         x, y = _sm(x), _sm(y)
 
     # Arc length along the line, then resample onto a uniform grid.
-    # NOTE: only X/Y are smoothed — speed is carried through raw so the colour
-    # ramp shows the real profile, not a blurred one.
+    # NOTE: only X/Y are smoothed — the driver channels are carried through raw
+    # so the traces show the real profile, not a blurred one.
     seg = np.hypot(np.diff(x), np.diff(y))
     arc = np.r_[0.0, np.cumsum(seg)]
     total = float(arc[-1]) or 1.0
     s_grid = np.linspace(0.0, total, RACING_LINE_POINTS)
+    chans = {
+        "S": np.interp(s_grid, arc, spd),
+        "T": np.interp(s_grid, arc, thr),
+        # TRUE lap distance at each point, not arc-length scaled pro rata.
+        # The smoothed line cuts corners, so arc length and the Distance channel
+        # drift apart — up to 33m over a lap (measured: Bahrain 33.1m, Monaco
+        # 29.3m, Monza 22.5m). Everything else on the trace (DRS zones, brake
+        # zones, sector ends) is indexed by the real Distance, so scaling arc
+        # instead put those markers up to 9px away from the feature they mark.
+        "D": np.interp(s_grid, arc, dist),
+    }
     return (
         s_grid,
         np.interp(s_grid, arc, x),
         np.interp(s_grid, arc, y),
-        np.interp(s_grid, arc, spd),
+        chans,
         total,
     )
+
+
+def _long_g(tel, smooth_window: int = 5):
+    """
+    Longitudinal acceleration in g, against lap distance.
+
+    Why this exists: FastF1's Brake channel is BOOLEAN — on or off, no pressure.
+    Rendering it as a bar implies the driver holds 100% brake through the whole
+    zone, which is not how anyone drives an F1 car: you hit peak pressure at the
+    brake point and bleed it off into the apex, or you lock the fronts.
+
+    Deceleration is the honest magnitude, and it is measured, not invented:
+    a = dv/dt straight off the speed channel. On a Bahrain pole lap that gives
+    ~5.7 g at the brake point at 305 km/h decaying to ~0.5 g at a 75 km/h apex —
+    the trail-braking profile, recovered from real data.
+
+    Returns (distance_m, g_signed) with + accelerating, - braking.
+    """
+    t = tel["Time"].dt.total_seconds().to_numpy().astype(float)
+    v = np.nan_to_num(tel["Speed"].to_numpy().astype(float)) / 3.6      # m/s
+    d = tel["Distance"].to_numpy().astype(float)
+
+    # Duplicate timestamps would make the gradient blow up.
+    keep = np.r_[True, np.diff(t) > 1e-6]
+    t, v, d = t[keep], v[keep], d[keep]
+    if len(t) < 3:
+        return d, np.zeros_like(d)
+
+    g = np.gradient(v, t) / 9.81
+
+    w = smooth_window
+    if w >= 2 and len(g) > w * 2:
+        k = np.ones(w) / w
+        pad = np.r_[np.full(w, g[0]), g, np.full(w, g[-1])]
+        g = np.convolve(pad, k, mode="same")[w:-w]
+    return d, g
 
 
 def _sector_ends(fastest_lap, t_raw, d_raw, total_distance):
@@ -236,19 +294,35 @@ def _drs_zones(tel, min_length_m: float = 120.0):
     FastF1 DRS codes: 0/1 = closed, 8 = eligible (past detection),
     10/12/14 = open. We merge contiguous "open" samples and drop blips.
     """
-    drs = tel["DRS"].to_numpy()
+    return _mask_to_zones(tel["DRS"].to_numpy() >= 10, tel, min_length_m)
+
+
+def _brake_zones(tel, min_length_m: float = 25.0):
+    """
+    Distance ranges where the driver was on the brakes.
+
+    FastF1's Brake channel is boolean (on/off, no pressure). Threshold at 0.5
+    so it survives the float round-trip. The minimum length is much shorter
+    than the DRS one on purpose — a quick stab of the brakes into a chicane is
+    only ~30 m but it is exactly the thing worth seeing on the trace.
+    """
+    brake = np.nan_to_num(tel["Brake"].to_numpy().astype(float))
+    return _mask_to_zones(brake > 0.5, tel, min_length_m)
+
+
+def _mask_to_zones(mask, tel, min_length_m: float):
+    """Merge contiguous True samples into {start, end} distance ranges."""
     dist = tel["Distance"].to_numpy().astype(float)
-    open_ = drs >= 10
 
     zones = []
     i = 0
-    n = len(open_)
+    n = len(mask)
     while i < n:
-        if not open_[i]:
+        if not mask[i]:
             i += 1
             continue
         j = i
-        while j + 1 < n and open_[j + 1]:
+        while j + 1 < n and mask[j + 1]:
             j += 1
         if dist[j] - dist[i] >= min_length_m:
             zones.append({"start": float(dist[i]), "end": float(dist[j])})
@@ -272,12 +346,18 @@ def _trim(payload):
         p["speed"] = round(p["speed"], 1)
         p["throttle"] = round(p["throttle"], 1)
         p["brake"] = round(p["brake"], 2)
+        if "g" in p:
+            p["g"] = round(p["g"], 2)
     for p in payload.get("track_points", []):
         p["X"] = round(p["X"], 1)
         p["Y"] = round(p["Y"], 1)
         p["D"] = round(p["D"], 1)
         if "S" in p:
             p["S"] = round(p["S"], 1)
+        if "T" in p:
+            p["T"] = round(p["T"], 1)
+        if "A" in p:
+            p["A"] = round(p["A"], 2)
     return payload
 
 
@@ -310,20 +390,32 @@ def get_track_data(year: int, race_round: int, session_type: str):
     # FastF1 Distance agree to within ~0.3% over a lap, so each point's "D" is
     # just its arc-length fraction scaled to the real lap distance - enough for
     # the frontend to split the path into sectors.
-    s_grid, x_grid, y_grid, spd_grid, line_len = _racing_line(telemetry)
+    s_grid, x_grid, y_grid, chans, line_len = _racing_line(telemetry)
+
+    # Longitudinal g, resampled onto the same arc-length grid as everything else.
+    g_dist, g_vals = _long_g(telemetry)
+    g_at_point = np.interp(chans["D"], g_dist, g_vals)
+    peak_decel_g = float(max(0.0, -g_at_point.min()))
+
     step = max(1, len(s_grid) // TRACK_OUTLINE_POINTS)
+    idx = list(range(0, len(s_grid), step))
+    if idx[-1] != len(s_grid) - 1:
+        idx.append(len(s_grid) - 1)      # close the lap exactly
     track_data = [
         {
             "X": float(x_grid[i]),
             "Y": float(y_grid[i]),
-            "D": float(s_grid[i] / line_len * total_distance),
-            "S": float(spd_grid[i]),          # km/h at this point on the line
+            "D": float(chans["D"][i]),
+            "S": float(chans["S"][i]),        # km/h at this point on the line
+            "T": float(chans["T"][i]),        # throttle % at this point
+            "A": float(g_at_point[i]),        # longitudinal g (+ accel, - braking)
         }
-        for i in range(0, len(s_grid), step)
+        for i in idx
     ]
 
     sector1_end, sector2_end = _sector_ends(fastest_lap, t_raw, d_raw, total_distance)
     drs_zones = _drs_zones(telemetry)
+    brake_zones = _brake_zones(telemetry)
 
     rotation = 0
     corners = []
@@ -351,6 +443,8 @@ def get_track_data(year: int, race_round: int, session_type: str):
         "sector1_end": sector1_end,
         "sector2_end": sector2_end,
         "drs_zones": drs_zones,
+        "brake_zones": brake_zones,
+        "peak_decel_g": peak_decel_g,
         "corners": corners,
     })
     cache_set(key, result)
@@ -411,8 +505,20 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
     total_distance = float(d_raw.max())
 
     # --- POSITION: smooth line, arc-length parameterised, driven by Distance ---
-    s_grid, x_grid, y_grid, _spd_grid, line_len = _racing_line(tel)
+    s_grid, x_grid, y_grid, _chans, line_len = _racing_line(tel)
     dist_t = np.interp(timeline, t_raw, d_raw)                       # clean, monotone
+    # Pro-rata, deliberately. Inverting the exact distance->arc relation is more
+    # accurate on paper but reintroduces the old stutter: the raw X/Y stream is
+    # noisy, so LOCAL arc length is not a faithful proxy for travel (distance
+    # advances 0.006m to 5.7m per uniform arc step). Inverting that noise gave
+    # implied speeds of 3686 km/h and dropped speed correlation from 0.994 to
+    # 0.31 — measured. Smoothing the correction first was also tested and barely
+    # helped (32.3m -> 27.0m of error while making motion worse).
+    #
+    # The cost of pro-rata is that the car sits up to ~33m (0.6% of a lap) along
+    # the track from its true distance. That is a few pixels on the map, and it
+    # does NOT affect the graphs — those are plotted against each point's real
+    # Distance ("D"), so the traces stay aligned with the zone markers.
     s_t = np.clip((dist_t - d_raw[0]) / (d_raw[-1] - d_raw[0]), 0, 1) * line_len
     x_interp = np.interp(s_t, s_grid, x_grid)
     y_interp = np.interp(s_t, s_grid, y_grid)
@@ -425,6 +531,14 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
     throttle_interp = np.interp(timeline, t_raw, tel["Throttle"].to_numpy())
     brake_interp = np.interp(timeline, t_raw, tel["Brake"].astype(float).to_numpy())
 
+    # Real braking magnitude. "brake" above is FastF1's boolean — driving the HUD
+    # bar from it pins the meter at 100% for the whole zone, which no driver does.
+    # Deceleration is the measured quantity, so the bar can show the pressure
+    # actually being bled off through the corner.
+    g_dist, g_vals = _long_g(tel)
+    g_interp = np.interp(dist_t, g_dist, g_vals)
+    peak_decel_g = float(max(0.0, -g_interp.min()))
+
     data = [
         {
             "time": float(timeline[i]),
@@ -436,6 +550,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
             "drs": int(round(drs_interp[i])),
             "throttle": float(throttle_interp[i]),
             "brake": float(brake_interp[i]),
+            "g": float(g_interp[i]),
             "distance": float(dist_t[i]),
         }
         for i in range(len(timeline))
@@ -463,6 +578,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
 
     result = _trim({
         "driver": driver_id,
+        "peak_decel_g": peak_decel_g,
         "driver_code": driver_code,
         "driver_name": driver_name,
         "team": team_name,

@@ -117,6 +117,10 @@ export const useRaceLoop = (telemetry, playbackSpeed, sectorBoundaries, official
                 gear: p2.gear,
                 throttle: lerp(p1.throttle, p2.throttle),
                 brake: lerp(p1.brake, p2.brake),
+                // Longitudinal g — the brake meter's magnitude. This object is an
+                // explicit field list, so a new telemetry channel has to be added
+                // here too or it silently never reaches the HUD.
+                g: lerp(p1.g, p2.g),
                 drs: p2.drs,
                 time: Math.min(elapsed, lastTime),
                 sector: sectorRef.current,

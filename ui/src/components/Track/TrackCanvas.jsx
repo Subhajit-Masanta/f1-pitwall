@@ -19,6 +19,11 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
     const wrapRef = useRef(null);
     const carRef = useRef(null);
     const proj = useRef({ scale: 1, offX: 0, offY: 0 });
+    // Last position in TRACK units, so a resize can re-project the car. Without
+    // this the parked car keeps the pixel position from the old projection and
+    // visibly drifts off the start/finish line when the stage resizes (opening
+    // the trace, rotating a phone, any window change).
+    const lastPos = useRef(null);
 
     const recompute = useCallback(() => {
         const el = wrapRef.current;
@@ -32,17 +37,11 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
         };
     }, [mapLayout]);
 
-    useEffect(() => {
-        recompute();
-        const ro = new ResizeObserver(recompute);
-        if (wrapRef.current) ro.observe(wrapRef.current);
-        return () => ro.disconnect();
-    }, [recompute]);
-
     const placeCar = useCallback((x, y) => {
         const { scale, offX, offY } = proj.current;
         const car = carRef.current;
         if (!car || !Number.isFinite(x) || !Number.isFinite(y)) return;
+        lastPos.current = { x, y };
         // NOTE: do NOT round here. A whole lap is squeezed into a few hundred
         // screen pixels, so at 1x the car advances ~0.06px per frame — rounding
         // to 0.1px quantises that into visible steps. Sub-pixel transforms are
@@ -53,6 +52,21 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
     }, []);
 
     useImperativeHandle(ref, () => ({ moveCar: placeCar }), [placeCar]);
+
+    useEffect(() => {
+        const apply = () => {
+            recompute();
+            // Re-project wherever the car already is. During playback the next
+            // frame would fix it anyway, but while parked or paused nothing
+            // else redraws it.
+            const p = lastPos.current;
+            if (p) placeCar(p.x, p.y);
+        };
+        apply();
+        const ro = new ResizeObserver(apply);
+        if (wrapRef.current) ro.observe(wrapRef.current);
+        return () => ro.disconnect();
+    }, [recompute, placeCar]);
 
     // Park the car on the start/finish line until the lap begins.
     useEffect(() => {
@@ -99,8 +113,12 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map' }, ref) => {
             >
                 {/* corner numbers, sitting behind everything */}
                 {corners.map((c) => (
-                    <text key={c.n} x={c.lx} y={c.ly}
-                        fill={F1.faint} fontSize={label * 0.85} fontFamily={MONO}
+                    <text key={`${c.n}${c.letter}`} x={c.lx} y={c.ly}
+                        // F1.faint is the same value as the track line, so the
+                        // numbers used to disappear into it wherever they sat
+                        // near the tarmac. Dim reads clearly without competing.
+                        fill={F1.dim} fillOpacity="0.85"
+                        fontSize={label * 0.82} fontFamily={MONO} fontWeight="600"
                         textAnchor="middle" dominantBaseline="central">
                         {c.n}{c.letter}
                     </text>

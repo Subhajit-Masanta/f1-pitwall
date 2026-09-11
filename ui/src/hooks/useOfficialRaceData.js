@@ -69,7 +69,7 @@ export const useOfficialRaceData = (year, round, session) => {
                 data.track_points = (data.track_points || []).map((p) => {
                     const r = applyRotation(p.X, p.Y, angle);
                     // keep D (lap distance) and S (speed) — rotation only moves X/Y
-                    return { X: r.x, Y: r.y, D: p.D ?? 0, S: p.S };
+                    return { X: r.x, Y: r.y, D: p.D ?? 0, S: p.S, T: p.T, A: p.A };
                 });
                 data.corners = (data.corners || []).map((c) => {
                     const r = applyRotation(c.X, c.Y, angle);
@@ -209,14 +209,78 @@ export const useOfficialRaceData = (year, round, session) => {
             .filter(Boolean);
 
         // Corner numbers, pushed outward from the track centroid.
-        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+        // Corner numbers.
+        //
+        // Pushing them away from the track CENTROID (the obvious approach) only
+        // works on a roughly convex circuit. Monza is two long straights and a
+        // couple of loops, so "away from the centre" points straight back across
+        // the tarmac for half the corners — numbers landed on the racing line.
+        //
+        // Instead: take the track's tangent at the corner, step along its normal,
+        // and pick whichever side is genuinely emptier by testing how far each
+        // candidate sits from the nearest piece of track. Then nudge outward
+        // (never drop) until it clears any label already placed.
+        const off = mapSize * 0.038;
+        const minGap = mapSize * 0.030;
+
+        // distance from a point to the nearest track point
+        const clearance = (px, py) => {
+            let best = Infinity;
+            for (let i = 0; i < pts.length; i += 2) {     // every 2nd point is plenty
+                const dx = pts[i].x - px, dy = pts[i].y - py;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < best) best = d2;
+            }
+            return Math.sqrt(best);
+        };
+
+        const nearestIdx = (px, py) => {
+            let bi = 0, bd = Infinity;
+            for (let i = 0; i < pts.length; i++) {
+                const dx = pts[i].x - px, dy = pts[i].y - py;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < bd) { bd = d2; bi = i; }
+            }
+            return bi;
+        };
+
+        // Seed the collision set with the sector-tick labels. They are drawn in
+        // the same space as the corner numbers, so without this a corner can end
+        // up hidden underneath "S1"/"S2" — Bahrain's turn 5 did exactly that.
+        const placed = [];
+        for (const t of [ticks.s1, ticks.s2, ticks.start]) {
+            if (t) placed.push({ lx: t.lx, ly: t.ly });
+        }
+
         const corners = (trackData.corners || []).map((c) => {
             const x = c.X, y = -c.Y;
-            const vx = x - cx, vy = y - cy;
-            const m = Math.hypot(vx, vy) || 1;
-            const off = mapSize * 0.035;
-            return { n: c.n, letter: c.letter, x, y, lx: x + (vx / m) * off, ly: y + (vy / m) * off };
+            const i = nearestIdx(x, y);
+            const t = tangentAt(i);
+            const nx = -t.y, ny = t.x;             // unit normal to the track here
+
+            // Walk outward from the corner, trying both sides at each step, and
+            // take the first spot that clears both the track and every label
+            // already placed. Nearest-acceptable, not furthest: maximising
+            // clearance flings numbers into open infield far from the corner
+            // they name. If nothing is ever clean, keep the least-bad option.
+            const needClear = off * 0.75;
+            let best = null, bestScore = -Infinity;
+            outer:
+            for (const mult of [1, 1.35, 1.75, 2.2]) {
+                for (const sign of [1, -1]) {
+                    const lx = x + nx * off * sign * mult;
+                    const ly = y + ny * off * sign * mult;
+                    const clear = clearance(lx, ly);
+                    const crowded = placed.some((q) => Math.hypot(q.lx - lx, q.ly - ly) < minGap);
+                    if (clear >= needClear && !crowded) { best = { lx, ly }; break outer; }
+                    const score = clear - (crowded ? minGap * 2 : 0) - off * (mult - 1);
+                    if (score > bestScore) { bestScore = score; best = { lx, ly }; }
+                }
+            }
+            const bx = best.lx, by = best.ly;
+            const pt = { n: c.n, letter: c.letter, x, y, lx: bx, ly: by };
+            placed.push(pt);
+            return pt;
         });
 
         // Speed-coloured racing line: chop the outline into short runs and give
@@ -278,7 +342,76 @@ export const useOfficialRaceData = (year, round, session) => {
             .map((z) => ({ x1: x(z.start), x2: x(z.end) }))
             .filter((z) => z.x2 > z.x1);
 
-        return { line, area, W, H, total, maxS, minS, sectorX, drsBars };
+        // Braking: redraw just those stretches of the trace in red, on top of
+        // the white line. Far more readable than another band of bars — you see
+        // the brake point land exactly where the speed starts to fall off.
+        const brakePaths = (trackData.brake_zones || [])
+            .map((z) => {
+                const seg = pts.filter((p) => p.D >= z.start && p.D <= z.end);
+                if (seg.length < 2) return null;
+                return `M ${seg.map((p) => `${x(p.D).toFixed(1)},${y(p.S).toFixed(1)}`).join(' L ')}`;
+            })
+            .filter(Boolean);
+
+        // --- pedals ------------------------------------------------------
+        // Throttle owns the FULL height of the band, not half of it. A quali
+        // lap sits at 100% throttle ~70% of the time, so a half-height area
+        // renders as a solid slab with notches — all ink, no information. Over
+        // the full height each lift travels twice as far and the shape reads as
+        // a trace again.
+        //
+        // Braking is a translucent column standing behind the trace rather than
+        // a mirrored area below it: FastF1's Brake channel is boolean (on/off,
+        // no pressure), so it has no magnitude to plot — what matters is WHERE
+        // it is and how it overlaps the throttle coming back on.
+        const PH = 100;                       // pedal viewBox height
+        const PAD = 2;                        // keeps the stroke off both edges
+        const tp = pts.filter((p) => Number.isFinite(p.T));
+        let throttleArea = null, throttleLine = null;
+        if (tp.length > 1) {
+            const yT = (t) => PAD + (1 - Math.max(0, Math.min(100, t)) / 100) * (PH - PAD * 2);
+            const seq = tp.map((p) => `${x(p.D).toFixed(1)},${yT(p.T).toFixed(1)}`).join(' L ');
+            throttleLine = `M ${seq}`;
+            throttleArea = `${throttleLine} L ${W},${PH} L 0,${PH} Z`;
+        }
+        // Braking, as actual magnitude rather than an on/off block.
+        //
+        // Two channels combined, each doing the job it can honestly do:
+        //   · brake_zones says WHETHER the pedal is pressed (FastF1's Brake is
+        //     boolean, so that is all it can tell us)
+        //   · longitudinal g says HOW HARD, because deceleration is measured
+        //
+        // Gating the g trace by the zones means a lift-and-coast doesn't draw as
+        // braking, and the shape inside a zone is the real one: a spike at the
+        // brake point bleeding off into the apex. Filling THIS trace is safe
+        // where filling throttle wasn't — braking is zero for most of a lap, so
+        // the fill reads as discrete peaks instead of a slab.
+        const peakG = trackData.peak_decel_g || 5;
+        const zones = trackData.brake_zones || [];
+        const inZone = (d) => zones.some((z) => d >= z.start && d <= z.end);
+        // One shape per zone rather than a single trace across the lap — a
+        // continuous line would sit at zero between zones and draw a red hairline
+        // along the floor for the whole lap.
+        const yB = (v) => PAD + (1 - v) * (PH - PAD * 2);
+        const brakeShapes = zones.map((z) => {
+            const seg = pts.filter((p) => Number.isFinite(p.A) && p.D >= z.start && p.D <= z.end);
+            if (seg.length < 2) return null;
+            const xs = seg.map((p) => x(p.D));
+            const body = seg.map((p, i) => {
+                const inten = Math.min(1, Math.max(0, -p.A) / peakG);
+                return `${xs[i].toFixed(1)},${yB(inten).toFixed(1)}`;
+            }).join(' L ');
+            // start and finish on the floor so each zone reads as its own peak
+            const line = `M ${xs[0].toFixed(1)},${PH} L ${body} L ${xs[xs.length - 1].toFixed(1)},${PH}`;
+            return { line, area: `${line} Z` };
+        }).filter(Boolean);
+
+        const pedal = throttleArea
+            ? { throttleArea, throttleLine, brakeShapes, peakG,
+                W, H: PH, top: PAD, sectorX }
+            : null;
+
+        return { line, area, W, H, total, maxS, minS, sectorX, drsBars, brakePaths, pedal };
     }, [trackData, sectorBoundaries]);
 
     return {

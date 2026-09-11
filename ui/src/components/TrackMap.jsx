@@ -4,8 +4,8 @@
  * Wires the data hook to the animation loop, and fans each frame out to three
  * imperative children (car, HUD, timing) so playback never re-renders.
  */
-import React, { useState, useRef, useCallback } from 'react';
-import { Play, Pause, RotateCcw } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Play, Pause, RotateCcw, Activity } from 'lucide-react';
 
 import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
@@ -23,6 +23,10 @@ const TrackMap = ({ year, round, session, raceName }) => {
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [loadingReplay, setLoadingReplay] = useState(false);
     const [view, setView] = useState('map');   // 'map' | 'speed'
+    // Trace open/closed, remembered between visits.
+    const [showTrace, setShowTrace] = useState(() => {
+        try { return localStorage.getItem('pitwall.trace') !== '0'; } catch { return true; }
+    });
     const narrow = useIsNarrow(720);
 
     const trackRef = useRef(null);
@@ -47,6 +51,31 @@ const TrackMap = ({ year, round, session, raceName }) => {
         isPlaying, play, pause, restart, currentSector, sectorTimes,
     } = useRaceLoop(telemetry, playbackSpeed, sectorBoundaries, officialSectorTimes, onFrame);
 
+    // The brake meter's 100% mark is this lap's peak deceleration, not a
+    // boolean — hand it to the HUD as soon as the circuit's data lands.
+    useEffect(() => {
+        const g = speedTrace?.pedal?.peakG;
+        if (g) hudRef.current?.setPeakG(g);
+    }, [speedTrace]);
+
+    // Scale the shift lights to the revs this lap actually uses. An F1 engine
+    // never comes near zero on a flying lap, so a 0-to-redline strip sits almost
+    // fully lit and tells you nothing.
+    useEffect(() => {
+        if (!telemetry?.length) return;
+        let hi = 0;
+        for (const f of telemetry) if (f.rpm > hi) hi = f.rpm;
+        if (hi > 0) hudRef.current?.setRpmRange(hi * 0.75, hi);
+    }, [telemetry]);
+
+    const toggleTrace = useCallback(() => {
+        setShowTrace((v) => {
+            const next = !v;
+            try { localStorage.setItem('pitwall.trace', next ? '1' : '0'); } catch { /* private mode */ }
+            return next;
+        });
+    }, []);
+
     const handleStart = useCallback(async () => {
         if (telemetry) { play(); return; }        // already loaded (resume/replay)
         setLoadingReplay(true);
@@ -67,17 +96,46 @@ const TrackMap = ({ year, round, session, raceName }) => {
     const finished = !isPlaying && sectorTimes.s3 != null;
     const drsCount = trackData?.drs_zones?.length || 0;
 
+    // Room to reserve at the bottom: HUD strip + (if it's open) the trace.
+    const hudSpace = narrow ? 180 : 150;
+    const traceH = narrow ? 56 : 76;
+    const pedalH = narrow ? 46 : 60;   // full-height throttle needs the travel
+    const traceOpen = !!speedTrace && showTrace;
+    // chart heights + the two label rows + the sector labels underneath
+    const traceChrome = narrow ? 52 : 70;
+    const traceBlock = traceOpen
+        ? traceH + (speedTrace.pedal ? pedalH : 0) + traceChrome
+        : 0;
+    const bottomSpace = hudSpace + traceBlock;
+    // A reserved band for the transport. Floating it over the map meant it
+    // landed on the track itself at circuits whose layout reaches the bottom of
+    // the bounding box (Monza's main straight, for one).
+    const transportSpace = narrow ? 52 : 58;
+    const mapBottom = bottomSpace + transportSpace;
+    // Reserved column for the timing rail. On desktop it is a vertical rail at
+    // top-left (x 24..214) and the map used the full width underneath it, so a
+    // circuit whose bounding box reaches that corner drew straight through the
+    // lap clock — Monza's turn 6/7 loop did exactly that.
+    //
+    // Measured cost of reserving it: Bahrain and Monza lose NOTHING (both are
+    // height-bound, so the narrower box changes nothing), Monaco loses 13% on
+    // its unusually wide 2.12 aspect. A horizontal strip across the top instead
+    // would have cost ~11% on every track, so this is the cheaper reservation.
+    const timingSpace = narrow ? 0 : 224;
+
+    // The stage GROWS by exactly the trace's height rather than the map giving
+    // up space for it — so the track is the same size open or closed, and
+    // opening the trace never shrinks the circuit.
+    const mapH = narrow ? 68 : 78;
     const stage = {
         position: 'relative', width: '100%',
-        height: narrow ? '68vh' : '78vh', minHeight: narrow ? 440 : 520,
+        // grows for BOTH the trace and the transport band, so the map's drawing
+        // area is identical no matter what is open below it
+        height: `calc(${mapH}vh + ${traceBlock + transportSpace}px)`,
+        minHeight: (narrow ? 440 : 520) + traceBlock + transportSpace,
         background: F1.bg, border: `1px solid ${F1.line}`,
         overflow: 'hidden', display: 'flex',
     };
-    // Room to reserve at the bottom: HUD strip + (if we have one) the trace.
-    const hudSpace = narrow ? 180 : 150;
-    const traceH = narrow ? 56 : 76;
-    const traceBlock = speedTrace ? traceH + (narrow ? 34 : 52) : 0;
-    const bottomSpace = hudSpace + traceBlock;
 
     return (
         <div style={stage}>
@@ -120,6 +178,23 @@ const TrackMap = ({ year, round, session, raceName }) => {
                             ))}
                         </div>
                     )}
+                    {speedTrace && (
+                        <button
+                            onClick={toggleTrace}
+                            title={showTrace ? 'Hide the speed trace' : 'Show the speed trace'}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '6px 10px', cursor: 'pointer',
+                                fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                                background: showTrace ? F1.text : F1.bg,
+                                color: showTrace ? F1.bg : F1.dim,
+                                border: `1px solid ${showTrace ? F1.text : F1.line}`,
+                            }}
+                        >
+                            <Activity size={12} />
+                            TRACE
+                        </button>
+                    )}
                     <MapControls playbackSpeed={playbackSpeed} setPlaybackSpeed={setPlaybackSpeed} />
                 </div>
             </div>
@@ -134,8 +209,8 @@ const TrackMap = ({ year, round, session, raceName }) => {
 
             {/* map + car — inset so nothing sits on top of the track */}
             <div style={{
-                position: 'absolute', left: 0, right: 0,
-                top: narrow ? 90 : 46, bottom: bottomSpace,
+                position: 'absolute', left: timingSpace, right: 0,
+                top: narrow ? 90 : 46, bottom: mapBottom,
             }}>
                 <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} />
             </div>
@@ -171,20 +246,25 @@ const TrackMap = ({ year, round, session, raceName }) => {
                 </div>
             )}
 
-            {speedTrace && (
+            {traceOpen && (
                 <div style={{
                     position: 'absolute', left: narrow ? 14 : 26, right: narrow ? 14 : 26,
                     bottom: hudSpace - (narrow ? 4 : 8), zIndex: 11,
                 }}>
-                    <SpeedTrace ref={traceRef} trace={speedTrace} narrow={narrow} height={traceH} />
+                    <SpeedTrace
+                        ref={traceRef} trace={speedTrace} narrow={narrow}
+                        height={traceH} pedalHeight={pedalH}
+                    />
                 </div>
             )}
 
             <TelemetryHUD ref={hudRef} narrow={narrow} />
 
-            {/* transport */}
+            {/* transport — sits ABOVE the trace block, floating over the foot of
+                the map. Offsetting INTO bottomSpace put it on top of the speed
+                chart once the pedal band made that block taller. */}
             <div style={{
-                position: 'absolute', bottom: bottomSpace - 44, left: '50%',
+                position: 'absolute', bottom: bottomSpace + 8, left: '50%',
                 transform: 'translateX(-50%)', zIndex: 16,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
             }}>
