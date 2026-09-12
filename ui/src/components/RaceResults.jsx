@@ -5,7 +5,7 @@
  * the all-cars replay: the driver list, team colours and finishing order all
  * come from the same session the replay will use.
  */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { raceService } from '../services/raceService';
 import { F1, MONO } from '../theme';
 import StageMessage from './StageMessage';

@@ -10,21 +10,21 @@
  * The parent drives the car through the imperative `moveCar(x, y)` handle
  * (x, y in track/viewBox units; projected to pixels here).
  */
-import React, {
+import {
     memo, forwardRef, useRef, useEffect, useCallback, useImperativeHandle,
 } from 'react';
 import { F1, MONO, speedColor } from '../../theme';
+import CarLayer from './CarLayer';
 
-const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', carColor = null, ghostColor = null }, ref) => {
+const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref) => {
     const wrapRef = useRef(null);
-    const carRef = useRef(null);
-    const ghostRef = useRef(null);
+    const layerRef = useRef(null);
     const proj = useRef({ scale: 1, offX: 0, offY: 0 });
-    // Last position in TRACK units, so a resize can re-project the car. Without
-    // this the parked car keeps the pixel position from the old projection and
-    // visibly drifts off the start/finish line when the stage resizes (opening
-    // the trace, rotating a phone, any window change).
-    const lastPos = useRef(null);
+    // Last position per car in TRACK units, so a resize can re-project them.
+    // Without this a parked car keeps the pixel position from the old
+    // projection and visibly drifts off the start/finish line whenever the
+    // stage resizes (opening the trace, rotating a phone, any window change).
+    const lastPos = useRef({});
 
     const recompute = useCallback(() => {
         const el = wrapRef.current;
@@ -38,60 +38,41 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', carColor = null,
         };
     }, [mapLayout]);
 
-    const placeCar = useCallback((x, y) => {
-        const { scale, offX, offY } = proj.current;
-        const car = carRef.current;
-        if (!car || !Number.isFinite(x) || !Number.isFinite(y)) return;
-        lastPos.current = { x, y };
-        // NOTE: do NOT round here. A whole lap is squeezed into a few hundred
-        // screen pixels, so at 1x the car advances ~0.06px per frame — rounding
-        // to 0.1px quantises that into visible steps. Sub-pixel transforms are
-        // interpolated by the compositor, which is exactly what we want.
-        car.style.transform =
-            `translate3d(${(x * scale + offX).toFixed(3)}px, ${(y * scale + offY).toFixed(3)}px, 0)`;
-        car.style.opacity = '1';
-    }, []);
-
-    /** Same projection, second marker. Null hides it. */
-    const placeGhost = useCallback((x, y) => {
-        const g = ghostRef.current;
-        if (!g) return;
+    /** Move a car, in TRACK units. The projection to pixels happens here. */
+    const move = useCallback((id, x, y) => {
         if (x == null || !Number.isFinite(x) || !Number.isFinite(y)) {
-            g.style.opacity = '0';
+            layerRef.current?.hide(id);
             return;
         }
         const { scale, offX, offY } = proj.current;
-        g.style.transform =
-            `translate3d(${(x * scale + offX).toFixed(3)}px, ${(y * scale + offY).toFixed(3)}px, 0)`;
-        g.style.opacity = '1';
+        lastPos.current[id] = { x, y };
+        layerRef.current?.place(id, x * scale + offX, y * scale + offY);
     }, []);
 
-    useImperativeHandle(ref, () => ({ moveCar: placeCar, moveGhost: placeGhost }),
-        [placeCar, placeGhost]);
+    useImperativeHandle(ref, () => ({ move }), [move]);
 
     useEffect(() => {
         const apply = () => {
             recompute();
-            // Re-project wherever the car already is. During playback the next
+            // Re-project every car where it already is. During playback the next
             // frame would fix it anyway, but while parked or paused nothing
-            // else redraws it.
-            const p = lastPos.current;
-            if (p) placeCar(p.x, p.y);
+            // else redraws them.
+            for (const [id, p] of Object.entries(lastPos.current)) move(id, p.x, p.y);
         };
         apply();
         const ro = new ResizeObserver(apply);
         if (wrapRef.current) ro.observe(wrapRef.current);
         return () => ro.disconnect();
-    }, [recompute, placeCar]);
+    }, [recompute, move]);
 
     // Park the car on the start/finish line until the lap begins.
     useEffect(() => {
         const t = mapLayout?.ticks?.start;
         if (t) {
             recompute();
-            placeCar((t.x1 + t.x2) / 2, (t.y1 + t.y2) / 2);
+            cars.forEach((c) => move(c.id, (t.x1 + t.x2) / 2, (t.y1 + t.y2) / 2));
         }
-    }, [mapLayout, recompute, placeCar]);
+    }, [mapLayout, recompute, move, cars]);
 
     if (!mapLayout) return null;
 
@@ -174,53 +155,7 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', carColor = null,
                 <Tick t={ticks.start} color="#FFFFFF" />
             </svg>
 
-            {/* moving cars — own GPU layer. Ghost first so the reference lap's
-                marker always stays on top when they overlap. */}
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-                {ghostColor && (
-                    <div ref={ghostRef} style={{
-                        position: 'absolute', top: 0, left: 0, width: 0, height: 0,
-                        willChange: 'transform', opacity: 0,
-                    }}>
-                        <div style={{
-                            position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
-                            width: 22, height: 22, borderRadius: '50%',
-                            background: `radial-gradient(circle, ${ghostColor}55 0%, ${ghostColor}00 70%)`,
-                        }} />
-                        {/* A HOLLOW ring, not a filled dot. The reference car is
-                            always F1 red, and a team colour can sit right on top
-                            of it (Ferrari is #F91536) — so the two are told apart
-                            by shape, which survives any colour pairing. */}
-                        <div style={{
-                            position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
-                            width: 13, height: 13, borderRadius: '50%',
-                            background: 'rgba(11,11,15,0.55)',
-                            border: `2.5px solid ${ghostColor}`,
-                            boxShadow: '0 0 0 1px rgba(255,255,255,0.35)',
-                        }} />
-                    </div>
-                )}
-                <div ref={carRef} style={{
-                    position: 'absolute', top: 0, left: 0, width: 0, height: 0,
-                    willChange: 'transform', opacity: 0,
-                }}>
-                    <div style={{
-                        position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
-                        width: 26, height: 26, borderRadius: '50%',
-                        background: carColor
-                            ? `radial-gradient(circle, ${carColor}55 0%, ${carColor}00 70%)`
-                            : 'radial-gradient(circle, rgba(225,6,0,0.45) 0%, rgba(225,6,0,0) 70%)',
-                    }} />
-                    {/* Solid disc. The compared car is a hollow ring, so the two
-                        stay apart by SHAPE even when both drivers are in the same
-                        team and share one colour. */}
-                    <div style={{
-                        position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)',
-                        width: 11, height: 11, borderRadius: '50%',
-                        background: carColor || F1.red, border: '1.5px solid #fff',
-                    }} />
-                </div>
-            </div>
+            <CarLayer ref={layerRef} cars={cars} />
         </div>
     );
 }));

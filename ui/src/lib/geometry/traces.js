@@ -136,7 +136,6 @@ export const buildSpeedTrace = (trackData, sectorBoundaries) => {
     // the fill reads as discrete peaks instead of a slab.
     const peakG = trackData.peak_decel_g || 5;
     const zones = trackData.brake_zones || [];
-    const inZone = (d) => zones.some((z) => d >= z.start && d <= z.end);
     // One shape per zone rather than a single trace across the lap — a
     // continuous line would sit at zero between zones and draw a red hairline
     // along the floor for the whole lap.

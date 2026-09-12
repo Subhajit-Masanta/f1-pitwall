@@ -4,12 +4,13 @@
  * Wires the data hook to the animation loop, and fans each frame out to three
  * imperative children (car, HUD, timing) so playback never re-renders.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Play, Pause, RotateCcw, Activity } from 'lucide-react';
 
 import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
 import { useIsNarrow } from '../hooks/useResponsive';
+import { stageLayout } from './stage/stageLayout';
 import { F1, MONO, SPEED_GRADIENT } from '../theme';
 import { SESSION_LABEL } from '../lib/router';
 
@@ -114,15 +115,15 @@ const TrackMap = ({
         if (g) {
             // Where the ghost is at the same elapsed time...
             const p = g.posAtTime(fr.time);
-            trackRef.current?.moveGhost(p.x, p.y);
+            trackRef.current?.move('ghost', p.x, p.y);
             // ...and how long IT took to reach where the reference car is now.
             // Positive = the ghost got here later, i.e. it is down on the lap.
             fr.delta = g.timeAtFraction(fr.dist / refDistRef.current) - fr.time;
         } else {
-            trackRef.current?.moveGhost(null, null);
+            trackRef.current?.move('ghost', null, null);
             fr.delta = null;
         }
-        trackRef.current?.moveCar(fr.x, fr.y);
+        trackRef.current?.move('ref', fr.x, fr.y);
         hudRef.current?.update(fr);
         timingRef.current?.update(fr);
         traceRef.current?.update(fr);
@@ -167,6 +168,21 @@ const TrackMap = ({
         });
     }, []);
 
+    // The cars on track, as data. One entry on /lap, two on /compare — a race
+    // replay is the same list with twenty. Drawn in order, so the car you are
+    // following goes last and stays on top.
+    // Memoised: a fresh array every render would defeat CarLayer's memo and
+    // rebuild the markers while the lap is playing.
+    // Lifting the colours out keeps the memo honest: it depends on exactly what
+    // it uses, so no suppression is needed and the markers are only rebuilt when
+    // a colour actually changes — not every time a new lap object arrives.
+    const ghostColor = (comparing && ghost) ? ghost.color : null;
+    const refColor = comparing ? (driver?.color || F1.red) : F1.red;
+    const cars = useMemo(() => [
+        ...(ghostColor ? [{ id: 'ghost', color: ghostColor, shape: 'ring' }] : []),
+        { id: 'ref', color: refColor, shape: 'disc' },
+    ], [ghostColor, refColor]);
+
     const handleStart = useCallback(async () => {
         setHasPlayed(true);
         if (telemetry) { play(); return; }        // already loaded (resume/replay)
@@ -202,19 +218,9 @@ const TrackMap = ({
     const finished = !isPlaying && sectorTimes.s3 != null;
     const drsCount = trackData?.drs_zones?.length || 0;
 
-    // Room to reserve at the bottom: HUD strip + (if it's open) the trace.
-    const hudSpace = narrow ? 180 : 150;
-    const traceH = narrow ? 56 : 76;
-    const pedalH = narrow ? 46 : 60;   // full-height throttle needs the travel
-    const deltaH = narrow ? 40 : 52;
     const traceOpen = !!speedTrace && showTrace;
-    // chart heights + the two label rows + the sector labels underneath
-    const traceChrome = narrow ? 52 : 70;
-    // Compare drops the speed chart entirely and stacks a pedal panel per
-    // driver, so the two layouts budget different things.
     const comparePanels = comparing ? (compareTrace?.panels?.length || 0) : 0;
     const showDeltaTrace = comparing && !!compareTrace?.deltaPath;
-    const labelRow = narrow ? 18 : 21;
 
     // Both drivers' splits, as a full-width row under the map. In the left rail
     // this cost ~60px of column, and the column comes straight off the map.
@@ -222,50 +228,16 @@ const TrackMap = ({
         a: { code: driver.code, color: driver.color, sectors: officialSectorTimes },
         b: { code: ghost.code, color: ghost.color, sectors: ghost.sectors },
     } : null;
-    const sectorRow = sectorCompare ? (narrow ? 34 : 40) : 0;
-    const sectorGap = narrow ? 8 : 12;
-    const traceBlock = !traceOpen ? 0
-        : comparePanels
-            ? comparePanels * (pedalH + labelRow)
-                + (showDeltaTrace ? deltaH + labelRow : 0)
-                + (sectorRow ? sectorRow + sectorGap : 0)
-                + (narrow ? 10 : 20)
-            // traceChrome already covers the two label rows and sector labels
-            : traceH + (speedTrace.pedal ? pedalH : 0) + traceChrome;
-    const bottomSpace = hudSpace + traceBlock;
-    // A reserved band for the transport. Floating it over the map meant it
-    // landed on the track itself at circuits whose layout reaches the bottom of
-    // the bounding box (Monza's main straight, for one).
-    const transportSpace = narrow ? 52 : 58;
-    const mapBottom = bottomSpace + transportSpace;
-    // Reserved column for the timing rail. On desktop it is a vertical rail at
-    // top-left (x 24..214) and the map used the full width underneath it, so a
-    // circuit whose bounding box reaches that corner drew straight through the
-    // lap clock — Monza's turn 6/7 loop did exactly that.
-    //
-    // Measured cost of reserving it: Bahrain and Monza lose NOTHING (both are
-    // height-bound, so the narrower box changes nothing), Monaco loses 13% on
-    // its unusually wide 2.12 aspect. A horizontal strip across the top instead
-    // would have cost ~11% on every track, so this is the cheaper reservation.
-    const timingSpace = narrow ? 0 : 224;
-    // On desktop the delta panel lives in the reserved timing column, so it
-    // costs nothing. Narrow has no such column, so it takes a band of its own
-    // and the stage grows to match rather than the map shrinking.
-    const deltaSpace = (comparing && ghost && narrow) ? 86 : 0;
 
-    // The stage GROWS by exactly the trace's height rather than the map giving
-    // up space for it — so the track is the same size open or closed, and
-    // opening the trace never shrinks the circuit.
-    const mapH = narrow ? 68 : 78;
-    const stage = {
-        position: 'relative', width: '100%',
-        // grows for BOTH the trace and the transport band, so the map's drawing
-        // area is identical no matter what is open below it
-        height: `calc(${mapH}vh + ${traceBlock + transportSpace + deltaSpace}px)`,
-        minHeight: (narrow ? 440 : 520) + traceBlock + transportSpace + deltaSpace,
-        background: F1.bg, border: `1px solid ${F1.line}`,
-        overflow: 'hidden', display: 'flex',
-    };
+    const L = stageLayout({
+        narrow,
+        traceOpen,
+        hasPedal: !!speedTrace?.pedal,
+        comparePanels,
+        showDeltaTrace,
+        hasSectorRow: !!sectorCompare,
+        hasDeltaPanel: comparing && !!ghost,
+    });
 
     // A head-to-head can't start until BOTH laps are in hand: pressing play with
     // only one loaded would replay the reference against nothing, and loading
@@ -286,7 +258,7 @@ const TrackMap = ({
     };
 
     return (
-        <div style={stage}>
+        <div style={{ ...L.stage, background: F1.bg, border: `1px solid ${F1.line}` }}>
             {/* header */}
             <div style={{
                 position: 'absolute', top: 0, left: 0, right: 0, zIndex: 14,
@@ -398,12 +370,10 @@ const TrackMap = ({
 
             {/* map + car — inset so nothing sits on top of the track */}
             <div style={{
-                position: 'absolute', left: timingSpace, right: 0,
-                top: (narrow ? 90 : 46) + deltaSpace, bottom: mapBottom,
+                position: 'absolute', left: L.timingSpace, right: 0,
+                top: L.mapTop, bottom: L.mapBottom,
             }}>
-                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view}
-                    carColor={comparing ? (driver?.color || null) : null}
-                    ghostColor={comparing ? (ghost?.color || null) : null} />
+                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} cars={cars} />
             </div>
 
             {/* legend — desktop only, it crowds a phone */}
@@ -440,10 +410,10 @@ const TrackMap = ({
             {traceOpen && (
                 <div style={{
                     position: 'absolute', left: narrow ? 14 : 26, right: narrow ? 14 : 26,
-                    bottom: hudSpace - (narrow ? 4 : 8), zIndex: 11,
+                    bottom: L.hudSpace - (narrow ? 4 : 8), zIndex: 11,
                 }}>
-                    {sectorRow > 0 && (
-                        <div style={{ marginBottom: sectorGap }}>
+                    {L.sectorRow > 0 && (
+                        <div style={{ marginBottom: L.sectorGap }}>
                             <SectorCompare
                                 compare={sectorCompare}
                                 sectorTimes={sectorTimes}
@@ -455,9 +425,9 @@ const TrackMap = ({
 
                     <SpeedTrace
                         ref={traceRef} trace={speedTrace} narrow={narrow}
-                        height={traceH} pedalHeight={pedalH}
+                        height={L.traceH} pedalHeight={L.pedalH}
                         compare={comparing ? compareTrace : null}
-                        deltaHeight={showDeltaTrace ? deltaH : 0}
+                        deltaHeight={showDeltaTrace ? L.deltaH : 0}
                     />
                 </div>
             )}
@@ -484,7 +454,7 @@ const TrackMap = ({
                 the map. Offsetting INTO bottomSpace put it on top of the speed
                 chart once the pedal band made that block taller. */}
             <div style={{
-                position: 'absolute', bottom: bottomSpace + 8, left: '50%',
+                position: 'absolute', bottom: L.bottomSpace + 8, left: '50%',
                 transform: 'translateX(-50%)', zIndex: 16,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
             }}>
@@ -509,7 +479,7 @@ const TrackMap = ({
                         {transport.icon}{transport.label}
                     </button>
                     {started && !isPlaying && !finished && (
-                        <button onClick={restart} style={ghost} title="Restart lap">
+                        <button onClick={restart} style={iconBtn} title="Restart lap">
                             <RotateCcw size={14} />
                         </button>
                     )}
@@ -526,7 +496,9 @@ const btn = {
     fontSize: 12, fontWeight: 700, letterSpacing: 1.5,
 };
 
-const ghost = {
+// NOTE: not `ghost` — that name is taken inside the component by the compared
+// driver, which shadowed this style and was handed to the button as its CSS.
+const iconBtn = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: 34, height: 34,
     background: 'transparent', color: F1.dim,

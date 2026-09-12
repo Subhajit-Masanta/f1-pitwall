@@ -7,7 +7,7 @@
  * the end stops people thinking it's broken. The bar creeps toward ~92% and
  * only completes when the data lands.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { F1, MONO } from '../theme';
 

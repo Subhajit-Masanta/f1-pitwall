@@ -6,7 +6,6 @@
  * Kept to the same minimal language as the replay stage — hairlines, mono
  * numerals, one accent.
  */
-import React from 'react';
 import { ArrowRight } from 'lucide-react';
 import { F1, MONO } from '../theme';
 

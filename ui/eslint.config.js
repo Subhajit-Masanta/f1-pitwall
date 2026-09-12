@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-    { ignores: ['dist'] },
+    { ignores: ['dist', '.vite', 'coverage', 'node_modules'] },
     {
         files: ['**/*.{js,jsx}'],
         languageOptions: {
@@ -29,6 +29,10 @@ export default [
             ...react.configs['jsx-runtime'].rules,
             ...reactHooks.configs.recommended.rules,
             'react/jsx-no-target-blank': 'off',
+            // This codebase deliberately uses plain props with JSDoc rather than
+            // PropTypes. Leaving the rule on buried 200+ notices per run and made
+            // lint useless for spotting the things that ARE bugs.
+            'react/prop-types': 'off',
             'react-refresh/only-export-components': [
                 'warn',
                 { allowConstantExport: true },
