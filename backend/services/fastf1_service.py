@@ -1,3 +1,5 @@
+import gc
+import threading
 from pathlib import Path
 
 import fastf1
@@ -27,6 +29,46 @@ longer freezes the whole server for every other request.
 
 
 # Service / Business Logic Layer
+
+# ---------------------------------------------------------------------------
+# Shared session loading
+# ---------------------------------------------------------------------------
+# A single compare page asks for /track, /drivers and two /telemetry. Each used
+# to call session.load() itself, so the SAME session was downloaded and parsed
+# four times, concurrently — four times the network, the CPU and the memory, on
+# a 512MB box whose FastF1 disk cache starts empty after every deploy. That is
+# what made the live site time out on any session the Mongo cache had not been
+# warmed for.
+#
+# The lock serialises callers asking for the same session; the one-entry memo
+# means the others get the already-loaded object instead of re-reading it. Only
+# the most recent session is held, so memory stays bounded to what a single
+# request needed anyway.
+_load_lock = threading.Lock()
+_last_session = {"key": None, "session": None}
+
+
+def load_session(year: int, race_round, session_type: str):
+    """Load a FastF1 session, reusing it if someone just loaded the same one."""
+    key = (year, str(race_round), str(session_type))
+    with _load_lock:
+        if _last_session["key"] == key and _last_session["session"] is not None:
+            print(f"[SESSION REUSE] {key}")
+            return _last_session["session"]
+
+        # Drop the previous session BEFORE loading the next one. Holding both
+        # at once is how a 512MB instance runs out of memory: a loaded session
+        # with telemetry is well over a hundred megabytes.
+        _last_session["key"] = None
+        _last_session["session"] = None
+        gc.collect()
+
+        session = fastf1.get_session(year, race_round, session_type)
+        session.load()
+        _last_session["key"] = key
+        _last_session["session"] = session
+        return session
+
 
 def get_race_data_test():
     """
@@ -79,6 +121,9 @@ def get_race_results(year: int, race_round: int, session_type: str = "R"):
     Works even where telemetry doesn't, since it only needs timing data.
     """
     print(f"[INFO] Fetching results for {year} R{race_round} ({session_type})...")
+    # Deliberately NOT load_session(): this is a lighter load with telemetry
+    # off. Sharing it would let a later caller pick up a session with no
+    # telemetry and fail confusingly.
     session = fastf1.get_session(year, race_round, session_type)
     session.load(telemetry=False, weather=False, messages=False)
 
@@ -251,8 +296,7 @@ def get_session_drivers(year: int, race_round: int, session_type: str):
         print(f"[CACHE HIT] {key}")
         return hit
 
-    session = fastf1.get_session(year, race_round, session_type)
-    session.load()
+    session = load_session(year, race_round, session_type)
 
     laps = session.laps
     if laps is None or laps.empty:
@@ -305,8 +349,7 @@ def get_track_data(year: int, race_round: int, session_type: str):
 
     print(f"[INFO] Fetching Track Data for {year} Round {race_round} ({session_type})...")
 
-    session = fastf1.get_session(year, race_round, session_type)
-    session.load()
+    session = load_session(year, race_round, session_type)
 
     fastest_lap = session.laps.pick_fastest()
     if fastest_lap is None or (hasattr(fastest_lap, "empty") and fastest_lap.empty):
@@ -400,8 +443,7 @@ def get_lap_telemetry(year: int, round_num: int, session_type: str, driver_id: s
         return hit
 
     print(f"[INFO] Fetching Telemetry for Driver {driver_id}...")
-    session = fastf1.get_session(year, round_num, session_type)
-    session.load()
+    session = load_session(year, round_num, session_type)
 
     # "fastest" = whoever set the quickest lap of the session. Don't hard-code a
     # driver number: the fastest driver changes by season and by session.
