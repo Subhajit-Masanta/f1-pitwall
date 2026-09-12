@@ -137,10 +137,12 @@ const TrackMap = ({
     // a colour actually changes — not every time a new lap object arrives.
     const ghostColor = (comparing && ghost) ? ghost.color : null;
     const refColor = comparing ? (driver?.color || F1.red) : F1.red;
+    const ghostCode = (comparing && ghost) ? ghost.code : null;
+    const refCode = driver?.code || null;
     const cars = useMemo(() => [
-        ...(ghostColor ? [{ id: 'ghost', color: ghostColor, shape: 'ring' }] : []),
-        { id: 'ref', color: refColor, shape: 'disc' },
-    ], [ghostColor, refColor]);
+        ...(ghostColor ? [{ id: 'ghost', color: ghostColor, shape: 'ring', label: ghostCode }] : []),
+        { id: 'ref', color: refColor, shape: 'disc', label: refCode },
+    ], [ghostColor, refColor, ghostCode, refCode]);
 
     const handleStart = useCallback(async () => {
         setHasPlayed(true);
