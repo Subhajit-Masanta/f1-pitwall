@@ -81,10 +81,10 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref
     const label = mapSize * 0.017;
     const speedView = view === 'speed' && speedSegments?.length > 0;
 
-    const Tick = ({ t, color, text }) => !t ? null : (
+    const Tick = ({ t, color, text, wide = false }) => !t ? null : (
         <g>
             <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
-                stroke={color} strokeWidth={lw * 1.5} strokeLinecap="round" />
+                stroke={color} strokeWidth={lw * (wide ? 2.4 : 1.5)} strokeLinecap="round" />
             {text && (
                 <text x={t.lx} y={t.ly} fill={color} fontSize={label * 0.9}
                     fontFamily={MONO} fontWeight="700" letterSpacing={label * 0.05}
@@ -138,12 +138,17 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref
                     <>
                         <path d={d} fill="none" stroke={F1.track}
                             strokeWidth={lw} strokeLinecap="round" strokeLinejoin="round" />
+                        {/* DRS reads as a brighter stretch OF the track, not a
+                            rope laid on top of it. The old version was a 3.2x
+                            glow under a 1.3x bright green line, which made a
+                            DRS zone the loudest thing on a head-to-head — ahead
+                            of both cars. */}
                         {drsPaths.map((z, i) => (
                             <g key={i}>
-                                <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.16"
-                                    strokeWidth={lw * 3.2} strokeLinecap="round" />
-                                <path d={z.d} fill="none" stroke={F1.drs}
-                                    strokeWidth={lw * 1.3} strokeLinecap="round" />
+                                <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.10"
+                                    strokeWidth={lw * 2.2} strokeLinecap="round" />
+                                <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.9"
+                                    strokeWidth={lw} strokeLinecap="round" />
                             </g>
                         ))}
                     </>
@@ -152,7 +157,9 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref
                 {/* sector + start-finish ticks */}
                 <Tick t={ticks.s1} color={F1.s1} text="S1" />
                 <Tick t={ticks.s2} color={F1.s2} text="S2" />
-                <Tick t={ticks.start} color="#FFFFFF" />
+                {/* the lap boundary: the only pure white on the map, and heavier
+                    than a sector tick so the two never read as the same thing */}
+                <Tick t={ticks.start} color="#FFFFFF" wide />
             </svg>
 
             <CarLayer ref={layerRef} cars={cars} />

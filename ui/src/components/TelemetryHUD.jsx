@@ -12,14 +12,18 @@
 import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { F1, MONO } from '../theme';
 
-const RPM_SEGMENTS = 18;
+const RPM_SEGMENTS = 15;
 
-// Shift-light colour bands, as a fraction of the strip.
-const RPM_GREEN_TO = 0.55;
-const RPM_RED_TO = 0.85;
-// Above this the strip flashes violet, the way a real wheel warns you to shift.
-// 0.88 of the used range fires on 13 separate bursts over a Bahrain pole lap —
-// one per upshift near the ceiling — without sitting on permanently.
+// Real shift lights, in the order a steering wheel runs them: GREEN while there
+// is still revs in hand, RED as the shift point approaches, VIOLET at the top —
+// then the whole strip flashes violet when it is time to pull the paddle. These
+// are fractions of the lap's used rev range (see rpmLoRef below for why that is
+// not 0..max).
+const RPM_GREEN_TO = 0.45;
+const RPM_RED_TO = 0.78;
+// Above this the strip flashes, the way a real wheel warns you to shift. 0.88
+// fires on 13 separate bursts over a Bahrain pole lap — one per upshift near
+// the ceiling — without sitting on permanently.
 const RPM_FLASH_AT = 0.88;
 // Flash period in MILLISECONDS, not frames: a frame-counted blink would run at
 // 14Hz on a 144Hz screen and 6Hz on a 60Hz one. Real shift lights blink ~6Hz.
@@ -72,7 +76,7 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
 
     // Last values written, so the DOM is only touched on a real change.
     const prev = useRef({
-        speed: -1, gear: '', thr: -1, brk: -1, g: -1, rpm: -1, lit: -1, flash: null, drs: null,
+        speed: -1, gear: '', thr: -1, brk: -1, g: -1, rpm: -1, lit: -1, flash: undefined, drs: null,
     });
 
     useImperativeHandle(ref, () => ({
@@ -150,10 +154,13 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
                     if (!seg) continue;
                     let bg;
                     if (inFlash) {
-                        bg = flashOn ? F1.purple : F1.line;
+                        // At the shift point the whole strip blinks violet.
+                        bg = flashOn ? F1.shift : F1.line;
                     } else if (i < lit) {
                         const f = i / n;
-                        bg = f < RPM_GREEN_TO ? F1.drs : (f < RPM_RED_TO ? F1.red : F1.purple);
+                        bg = f < RPM_GREEN_TO ? F1.thr
+                            : f < RPM_RED_TO ? F1.brk
+                                : F1.shift;
                     } else {
                         bg = F1.line;
                     }
@@ -182,7 +189,7 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
 
     const bigNum = narrow ? 32 : 44;
     const pedalW = narrow ? 84 : 154;
-    const segCount = narrow ? 12 : RPM_SEGMENTS;
+    const segCount = narrow ? 11 : RPM_SEGMENTS;
     segCountRef.current = segCount;
 
     return (
@@ -191,8 +198,10 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
             display: 'flex', alignItems: 'center',
             gap: narrow ? 16 : 34, flexWrap: narrow ? 'wrap' : 'nowrap',
             padding: narrow ? '12px 14px 16px' : '16px 26px',
-            borderTop: `1px solid ${F1.line}`,
-            background: 'linear-gradient(180deg, rgba(11,11,15,0) 0%, rgba(11,11,15,0.96) 42%)',
+            // No top border: the strip belongs to the stage rather than sitting
+            // on it as a separate card. The gradient alone separates it, which
+            // is one less line on a page that had a box around everything.
+            background: 'linear-gradient(180deg, rgba(11,11,15,0) 0%, rgba(11,11,15,0.92) 38%, rgba(11,11,15,0.97) 100%)',
         }}>
             <div style={{ minWidth: narrow ? 88 : 108 }}>
                 <Label>SPEED</Label>
@@ -213,9 +222,12 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                <Pedal label="THR" color={F1.drs} barRef={thrRef} valRef={thrValRef}
+                {/* Green throttle, red brake: the F1 convention, readable without
+                    a legend. Identity is carried elsewhere — the car, its tag,
+                    the pickers and the delta are all team-coloured. */}
+                <Pedal label="THR" color={F1.thr} barRef={thrRef} valRef={thrValRef}
                     w={pedalW} initial="0%" />
-                <Pedal label="BRK" color={F1.red} barRef={brkRef} valRef={brkValRef}
+                <Pedal label="BRK" color={F1.brk} barRef={brkRef} valRef={brkValRef}
                     w={pedalW} initial="0.0 G" />
             </div>
 
@@ -236,9 +248,9 @@ const TelemetryHUD = forwardRef(({ narrow = false }, ref) => {
                     {Array.from({ length: segCount }).map((_, i) => (
                         <div key={i} ref={(el) => { rpmRefs.current[i] = el; }}
                             style={{
-                                width: narrow ? 6 : 7,
+                                width: narrow ? 6 : 8,
                                 // stepped up toward the shift point, like a real wheel's strip
-                                height: Math.round((narrow ? 12 : 13) + (i / segCount) * (narrow ? 6 : 8)),
+                                height: Math.round((narrow ? 11 : 12) + (i / segCount) * (narrow ? 6 : 9)),
                                 background: F1.line,
                             }} />
                     ))}

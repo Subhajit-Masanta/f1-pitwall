@@ -15,7 +15,14 @@ import { F1, MONO } from '../theme';
 /** Gap at which the bar is fully deflected to one side. */
 const FULL_SCALE_S = 1.0;
 
-const Plate = ({ code, team, color, dashed }) => (
+/**
+ * The team name used to sit under the code here and never once fitted: two
+ * plates share a ~190px column, so "RED BULL RACING" always rendered as
+ * "RED BULL RA…". It is dropped rather than truncated — the colour flash
+ * already says which team, and the pedal panel below spells the name out in
+ * full. That buys the code room to be read at a glance, which is the job.
+ */
+const Plate = ({ code, color, dashed }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
         <span style={{
             width: 4, height: 22, flexShrink: 0, backgroundColor: color,
@@ -25,20 +32,11 @@ const Plate = ({ code, team, color, dashed }) => (
                 ? `repeating-linear-gradient(180deg, ${color} 0 4px, rgba(0,0,0,0.55) 4px 7px)`
                 : 'none',
         }} />
-        <div style={{ minWidth: 0 }}>
-            <div style={{
-                fontFamily: MONO, fontSize: 14, fontWeight: 700, color: F1.text,
-                lineHeight: 1.1, letterSpacing: 0.5,
-            }}>
-                {code || '---'}
-            </div>
-            <div style={{
-                fontSize: 9, letterSpacing: 0.8, color: F1.dim,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                maxWidth: 104,
-            }}>
-                {(team || '').toUpperCase()}
-            </div>
+        <div style={{
+            fontFamily: MONO, fontSize: 16, fontWeight: 700, color: F1.text,
+            lineHeight: 1.1, letterSpacing: 0.6,
+        }}>
+            {code || '---'}
         </div>
     </div>
 );
@@ -69,7 +67,7 @@ const DeltaBar = forwardRef(({ reference, ghost, narrow }, ref) => {
             // green = the compared driver is ahead, red = behind
             const sign = d > 0.0005 ? 1 : d < -0.0005 ? -1 : 0;
             if (sign !== prev.current.sign) {
-                valRef.current.style.color = sign > 0 ? F1.red : sign < 0 ? F1.green : F1.text;
+                valRef.current.style.color = sign > 0 ? F1.loss : sign < 0 ? F1.gain : F1.text;
                 prev.current.sign = sign;
             }
             if (barRef.current) {
@@ -80,7 +78,7 @@ const DeltaBar = forwardRef(({ reference, ghost, narrow }, ref) => {
                 const half = Math.min(50, (Math.abs(d) / FULL_SCALE_S) * 50);
                 barRef.current.style.width = half.toFixed(1) + '%';
                 barRef.current.style.marginLeft = (d >= 0 ? 50 : 50 - half).toFixed(1) + '%';
-                barRef.current.style.background = sign > 0 ? F1.red : sign < 0 ? F1.green : F1.dim;
+                barRef.current.style.background = sign > 0 ? F1.loss : sign < 0 ? F1.gain : F1.dim;
             }
         },
     }), []);
@@ -98,12 +96,12 @@ const DeltaBar = forwardRef(({ reference, ghost, narrow }, ref) => {
             border: `1px solid ${F1.line}`,
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Plate code={reference?.code} team={reference?.team}
+                <Plate code={reference?.code}
                     color={reference?.color || F1.text} />
                 <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.4, color: F1.faint }}>
                     VS
                 </span>
-                <Plate code={ghost.code} team={ghost.team} color={ghost.color} dashed={sameTeam} />
+                <Plate code={ghost.code} color={ghost.color} dashed={sameTeam} />
             </div>
 
             <div>

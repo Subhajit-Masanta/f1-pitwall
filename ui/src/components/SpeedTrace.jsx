@@ -117,17 +117,19 @@ const PedalPanel = ({ geom, title, subtitle, color, height, sectorX, headRef, fi
                             strokeWidth={1} vectorEffect="non-scaling-stroke" />
                     ))}
 
-                    {/* Braking stays red in every panel — it means the same thing
-                        for everyone, and the driver's identity is carried by the
-                        throttle line.
+                    {/* Brake red: the F1 convention, and it means the same thing
+                        in both panels, so it is not the driver's colour. The red
+                        itself is #FF3B30 rather than the old #E10600 — that one
+                        at low alpha over near-black went BROWN under an orange
+                        McLaren line, which is what made this look muddy.
 
-                        It is a FILLED MASS with no outline; throttle is the
-                        only stroked line in the panel. Two red teams exist
-                        (Ferrari #F91536, Alfa #C92D4B), and an outlined brake
-                        shape next to a red throttle line reads as one blob —
-                        fill-versus-stroke separates them for any team colour. */}
+                        It stays a FILLED MASS with no outline while throttle is
+                        the only stroked line, so brake and throttle separate by
+                        fill-versus-stroke, not by hue. That is what keeps it
+                        readable against the red teams' own colour (Ferrari
+                        #E80020, Alfa #C92D4B). */}
                     {geom.brakeShapes.map((b, i) => (
-                        <path key={i} d={b.area} fill={F1.red} fillOpacity="0.38" />
+                        <path key={i} d={b.area} fill={F1.brk} fillOpacity="0.55" />
                     ))}
 
                     <path d={geom.throttlePath} fill="none" stroke={color}
@@ -203,6 +205,8 @@ const SpeedTrace = forwardRef(({
 
     // ---- COMPARE: one pedal panel per driver, then the delta ---------------
     if (compare?.panels) {
+        // The reference car's colour — the delta is drawn against it.
+        const aColor = compare.panels[0]?.color || F1.dim;
         return (
             <div ref={wrapRef} style={{ width: '100%' }}>
                 {compare.panels.map((p, i) => (
@@ -230,9 +234,13 @@ const SpeedTrace = forwardRef(({
                             left={<Label>DELTA</Label>}
                             right={
                                 <Mono>
-                                    ±{compare.deltaMax.toFixed(1)}s · {compare.code} above the line is
-                                    {' '}<span style={{ color: F1.red }}>losing</span>,
-                                    {' '}below is <span style={{ color: F1.green }}>gaining</span>
+                                    ±{compare.deltaMax.toFixed(1)}s · above{' '}
+                                    <span style={{ color: aColor, fontWeight: 700 }}>
+                                        {compare.panels[0].code}
+                                    </span>{' '}ahead · below{' '}
+                                    <span style={{ color: compare.color, fontWeight: 700 }}>
+                                        {compare.code}
+                                    </span>{' '}ahead
                                 </Mono>
                             }
                         />
@@ -247,10 +255,25 @@ const SpeedTrace = forwardRef(({
                             >
                                 {sectorX.map((sx, i) => (
                                     <line key={i} x1={sx} y1={0} x2={sx} y2={compare.DH}
-                                        stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.5"
+                                        stroke={i === 0 ? F1.s1 : F1.s2} strokeOpacity="0.28"
                                         strokeWidth={1} vectorEffect="non-scaling-stroke" />
                                 ))}
-                                <path d={compare.deltaArea} fill={compare.color} fillOpacity="0.16" />
+                                {/* The fill is the readout. Above the zero line the
+                                    reference is ahead, below it the ghost is — so each
+                                    half carries that driver's team colour and the shape
+                                    alone says who is winning which part of the lap. A
+                                    single flat fill could not: it looked identical
+                                    whoever was in front. The hard stop at 50% is the
+                                    zero line, which is where the area path closes. */}
+                                <defs>
+                                    <linearGradient id="deltaFill" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={aColor} stopOpacity="0.42" />
+                                        <stop offset="49.9%" stopColor={aColor} stopOpacity="0.12" />
+                                        <stop offset="50.1%" stopColor={compare.color} stopOpacity="0.12" />
+                                        <stop offset="100%" stopColor={compare.color} stopOpacity="0.42" />
+                                    </linearGradient>
+                                </defs>
+                                <path d={compare.deltaArea} fill="url(#deltaFill)" />
                                 <path d={compare.deltaPath} fill="none" stroke={compare.color}
                                     strokeWidth={1.75} strokeLinejoin="round"
                                     vectorEffect="non-scaling-stroke" />
@@ -276,7 +299,7 @@ const SpeedTrace = forwardRef(({
                 left={<Label>SPEED</Label>}
                 right={
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {brakePaths?.length > 0 && <Swatch color={F1.red} label="BRAKING" />}
+                        {brakePaths?.length > 0 && <Swatch color={F1.brk} label="BRAKING" />}
                         {drsBars?.length > 0 && <Swatch color={F1.drs} label="DRS" />}
                         <Mono>{Math.round(maxS)} km/h</Mono>
                     </div>
@@ -307,7 +330,7 @@ const SpeedTrace = forwardRef(({
                         strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
 
                     {brakePaths?.map((d, i) => (
-                        <path key={i} d={d} fill="none" stroke={F1.red} strokeWidth={2.5}
+                        <path key={i} d={d} fill="none" stroke={F1.brk} strokeWidth={2.5}
                             strokeLinecap="round" strokeLinejoin="round"
                             vectorEffect="non-scaling-stroke" />
                     ))}
@@ -340,7 +363,9 @@ const SpeedTrace = forwardRef(({
                         peakG: pedal.peakG,
                     }}
                     title="PEDALS"
-                    color={F1.drs}
+                    // Solo: one car, so the throttle takes the convention green
+                    // rather than an identity colour there is nobody to contrast with.
+                    color={F1.thr}
                     height={pedalHeight}
                     sectorX={sectorX}
                     headRef={(el) => { pedalHeadRef.current = el; }}

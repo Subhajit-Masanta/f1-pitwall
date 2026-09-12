@@ -1,32 +1,71 @@
 /**
  * 📄 theme.js — the F1-broadcast look, kept deliberately restrained.
  *
- * Rule of thumb: the track is neutral, the UI is monochrome, and colour is
- * reserved for things that actually mean something (DRS, sector state, red
- * accent). That's what makes it read as F1 TV rather than a dashboard.
+ * ONE RULE: saturated colour belongs to the drivers. Everything structural —
+ * track, sectors, DRS, panels, type — is neutral.
+ *
+ * That rule replaced an earlier palette carrying seven accents (red, DRS green,
+ * a pink/cyan/amber sector set, purple, green) on top of two team colours. With
+ * eight hues on screen the brightest thing on a head-to-head was a DRS zone
+ * rather than either car, which is exactly backwards: the cars are the subject.
+ * Sectors now separate by VALUE instead of hue, DRS is a muted mint rather than
+ * a glowing rope, and red is spent on one thing only — see below.
  */
 export const F1 = {
+    // The accent. Transport control and the app's own mark, nothing else. It
+    // used to double as the solo car, S1 ticks and the delta text, which left
+    // it meaning "important" in three unrelated ways, i.e. nothing.
     red: '#E10600',
+
     bg: '#0B0B0F',
     panel: '#121218',
+    surface: '#16161D',   // one step up, for menus and lifted panels
     line: '#22222C',
     hair: 'rgba(255,255,255,0.07)',
 
+    // Three tiers of presence, not three greys picked by eye.
     text: '#FFFFFF',
-    dim: '#909099',    // lifted for legibility on the near-black bg
+    dim: '#909099',
     faint: '#4C4C58',
 
-    track: '#4C4C58',
-    drs: '#00E676',
+    track: '#43434E',
 
-    // sector identity (used for ticks + the timing rail, never the whole track)
-    s1: '#E44FB2',
-    s2: '#37C6FF',
-    s3: '#FFC300',
+    // --- the universal F1 signals -------------------------------------------
+    // These are the exception to the one-rule above, and they earn it: green
+    // throttle, red brake and green DRS are conventions an F1 viewer already
+    // reads without a legend. They carry meaning, so they are not decoration.
+    // What they must NOT do is shout over the cars, which is what the old
+    // #00E676 DRS did — so they sit at broadcast saturation, not neon.
+    drs: '#22C55E',       // DRS green
+    thr: '#22C55E',       // throttle — same green: both mean "power on"
+    brk: '#FF3B30',       // brake red. Clean and bright on purpose: the old
+                          // #E10600 at low alpha over near-black went BROWN
+                          // under an orange McLaren trace.
 
-    purple: '#B14BE0',
-    green: '#00D26A',
+    // Shift lights run green -> red -> violet and flash violet at the limit,
+    // the way a real steering wheel does. Violet exists for that and nothing
+    // else — it is the top of a scale, not a palette colour.
+    shift: '#B14BE0',
+
+    // Sector identity as a VALUE ramp on one neutral. Hue carried no meaning
+    // here — S1 was not "more pink" than S2 — so it was pure noise competing
+    // with the team colours. Each step stays clear of the track line above.
+    //
+    // The ramp deliberately STOPS SHORT of white: the start/finish line is pure
+    // white, and an S1 tick at #EDEDF5 was indistinguishable from it on the map.
+    // White now means the lap boundary and nothing else.
+    s1: '#D2D2DE',
+    s2: '#9898A8',
+    s3: '#68687A',
+
+    // Sign, not identity: a gap closing or opening. Kept desaturated so a
+    // delta readout never outshouts the cars it describes.
+    gain: '#4BBF87',
+    loss: '#D8564F',
 };
+
+/** The sector ramp in order, for anything that indexes sectors 1..3. */
+export const SECTOR = [F1.s1, F1.s2, F1.s3];
 
 export const MONO = "'Chivo Mono', ui-monospace, 'SF Mono', Menlo, monospace";
 

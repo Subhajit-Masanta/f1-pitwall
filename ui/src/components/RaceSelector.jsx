@@ -2,17 +2,7 @@ import { useState, useEffect } from 'react';
 import { raceService } from '../services/raceService';
 import { Calendar, MapPin } from 'lucide-react';
 import { F1 } from '../theme';
-
-const selectStyle = {
-    padding: '9px 12px',
-    fontSize: 13,
-    fontWeight: 600,
-    letterSpacing: 0.3,
-    background: F1.bg,
-    color: F1.text,
-    border: `1px solid ${F1.line}`,
-    cursor: 'pointer',
-};
+import Select from './ui/Select';
 
 /**
  * Season + Grand Prix picker.
@@ -101,48 +91,49 @@ const RaceSelector = ({
         }}>
             <Calendar color={F1.red} size={18} />
 
-            <select
+            <Select
+                ariaLabel="Season"
                 value={year}
-                onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
-                style={selectStyle}
-            >
-                {Array.from(
+                options={Array.from(
                     { length: new Date().getFullYear() - 2018 + 1 },
                     (_, i) => new Date().getFullYear() - i
-                ).map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+                ).map((y) => ({ value: y, label: String(y) }))}
+                onChange={(v) => onYearChange(parseInt(v, 10))}
+                minWidth={96}
+                maxWidth={110}
+                mono
+            />
 
-            <select
+            <Select
+                ariaLabel="Grand Prix"
                 value={selected ? String(selected.round) : ''}
-                onChange={(e) => onSelectRound(e.target.value ? parseInt(e.target.value, 10) : null)}
-                style={{ ...selectStyle, minWidth: 260, flex: '1 1 260px', maxWidth: 380 }}
+                placeholder={loading
+                    ? (waking ? 'Waking up the server…' : 'Loading calendar…')
+                    : 'Select a Grand Prix'}
+                options={races.map((race) => ({
+                    value: String(race.round),
+                    label: race.name,
+                    short: `R${race.round} · ${race.name}`,
+                    sub: `R${race.round}`,
+                }))}
+                onChange={(v) => onSelectRound(v ? parseInt(v, 10) : null)}
                 disabled={loading || !!error}
-            >
-                <option value="">
-                    {loading
-                        ? (waking ? 'Waking up the server…' : 'Loading calendar…')
-                        : '— Select a Grand Prix —'}
-                </option>
-                {races.map((race) => (
-                    <option key={race.round} value={race.round}>
-                        R{race.round} · {race.name}
-                    </option>
-                ))}
-            </select>
+                minWidth={260}
+                maxWidth={380}
+            />
 
             {showSession && selected && (
-                <select
+                <Select
+                    ariaLabel="Session"
                     value={session || 'Q'}
-                    onChange={(e) => onSelectSession?.(e.target.value)}
-                    style={{ ...selectStyle, minWidth: 132 }}
+                    options={sessions.length === 0
+                        ? [{ value: session || 'Q', label: 'Loading sessions…' }]
+                        : sessions.map((sn) => ({ value: sn.code, label: sn.name }))}
+                    onChange={(v) => onSelectSession?.(v)}
                     disabled={sessions.length === 0}
-                >
-                    {sessions.length === 0
-                        ? <option value={session || 'Q'}>Loading sessions…</option>
-                        : sessions.map((s) => (
-                            <option key={s.code} value={s.code}>{s.name}</option>
-                        ))}
-                </select>
+                    minWidth={132}
+                    maxWidth={170}
+                />
             )}
 
             {selected && (

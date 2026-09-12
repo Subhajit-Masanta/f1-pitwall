@@ -154,7 +154,10 @@ const TrackMap = ({
     // it uses, so no suppression is needed and the markers are only rebuilt when
     // a colour actually changes — not every time a new lap object arrives.
     const ghostColor = (comparing && ghost) ? ghost.color : null;
-    const refColor = comparing ? (driver?.color || F1.red) : F1.red;
+    // Team colour in EVERY mode, solo included. Red used to stand in for the
+    // solo car, which spent the one accent on a car that already had a colour
+    // of its own — and left red meaning both "this car" and "press me".
+    const refColor = driver?.color || F1.red;
     const ghostCode = (comparing && ghost) ? ghost.code : null;
     const refCode = driver?.code || null;
     const cars = useMemo(() => [
@@ -238,7 +241,14 @@ const TrackMap = ({
     };
 
     return (
-        <div style={{ ...L.stage, background: F1.bg, border: `1px solid ${F1.line}` }}>
+        <div style={{
+            ...L.stage,
+            // A soft pool of light under the track, so the map reads as a lit
+            // stage rather than a drawing floating on a flat black rectangle.
+            // Cheap: one static gradient, painted once, never on the hot path.
+            background: `radial-gradient(120% 80% at 58% 46%, #15151C 0%, ${F1.bg} 62%)`,
+            border: `1px solid ${F1.line}`,
+        }}>
             {/* header */}
             <div ref={headerRef} style={{
                 position: 'absolute', top: 0, left: 0, right: 0, zIndex: 14,

@@ -58,7 +58,7 @@ const SectorCompare = ({ compare, sectorTimes, currentSector, narrow }) => {
                         </span>
 
                         <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
-                            <span style={{ ...num, color: !both ? F1.faint : aFaster ? F1.green : F1.text }}>
+                            <span style={{ ...num, color: !both ? F1.faint : aFaster ? F1.gain : F1.text }}>
                                 {both ? fmtSector(av) : '--.---'}
                             </span>
                             <span style={{ fontSize: 9, color: a.color, fontWeight: 700 }}>{a.code}</span>
@@ -67,7 +67,7 @@ const SectorCompare = ({ compare, sectorTimes, currentSector, narrow }) => {
                         <span style={{ color: F1.faint, fontSize: 10 }}>/</span>
 
                         <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
-                            <span style={{ ...num, color: !both ? F1.faint : !aFaster ? F1.green : F1.text }}>
+                            <span style={{ ...num, color: !both ? F1.faint : !aFaster ? F1.gain : F1.text }}>
                                 {both ? fmtSector(bv) : '--.---'}
                             </span>
                             <span style={{ fontSize: 9, color: b.color, fontWeight: 700 }}>{b.code}</span>
@@ -75,7 +75,7 @@ const SectorCompare = ({ compare, sectorTimes, currentSector, narrow }) => {
 
                         <span style={{
                             ...num, fontSize: narrow ? 10 : 11, marginLeft: 'auto', flexShrink: 0,
-                            color: gap == null ? F1.faint : gap > 0 ? F1.red : F1.green,
+                            color: gap == null ? F1.faint : gap > 0 ? F1.loss : F1.gain,
                         }}>
                             {gap == null ? '--' : (gap >= 0 ? '+' : '−') + Math.abs(gap).toFixed(3)}
                         </span>
