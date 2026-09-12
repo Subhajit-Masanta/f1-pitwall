@@ -249,6 +249,8 @@ export const useOfficialRaceData = (year, round, session, referenceDriver = null
                     // lap_time is a formatted string; lap_seconds is the number
                     lapTime: data.lap_seconds,
                     gap: meta?.gap,
+                    // official splits, so the rail can show both drivers' sectors
+                    sectors: data.sector_times || null,
                 },
             );
             setGhost(built);

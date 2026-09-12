@@ -19,6 +19,7 @@ import TelemetryHUD from './TelemetryHUD';
 import SectorTiming from './SectorTiming';
 import SpeedTrace from './SpeedTrace';
 import DeltaBar from './DeltaBar';
+import SectorCompare from './SectorCompare';
 import StageMessage from './StageMessage';
 
 /**
@@ -214,10 +215,20 @@ const TrackMap = ({
     const comparePanels = comparing ? (compareTrace?.panels?.length || 0) : 0;
     const showDeltaTrace = comparing && !!compareTrace?.deltaPath;
     const labelRow = narrow ? 18 : 21;
+
+    // Both drivers' splits, as a full-width row under the map. In the left rail
+    // this cost ~60px of column, and the column comes straight off the map.
+    const sectorCompare = (comparing && driver && ghost) ? {
+        a: { code: driver.code, color: driver.color, sectors: officialSectorTimes },
+        b: { code: ghost.code, color: ghost.color, sectors: ghost.sectors },
+    } : null;
+    const sectorRow = sectorCompare ? (narrow ? 34 : 40) : 0;
+    const sectorGap = narrow ? 8 : 12;
     const traceBlock = !traceOpen ? 0
         : comparePanels
             ? comparePanels * (pedalH + labelRow)
                 + (showDeltaTrace ? deltaH + labelRow : 0)
+                + (sectorRow ? sectorRow + sectorGap : 0)
                 + (narrow ? 10 : 20)
             // traceChrome already covers the two label rows and sector labels
             : traceH + (speedTrace.pedal ? pedalH : 0) + traceChrome;
@@ -382,6 +393,7 @@ const TrackMap = ({
                 currentSector={currentSector}
                 visible={started}
                 narrow={narrow}
+                compare={sectorCompare}
             />
 
             {/* map + car — inset so nothing sits on top of the track */}
@@ -430,6 +442,17 @@ const TrackMap = ({
                     position: 'absolute', left: narrow ? 14 : 26, right: narrow ? 14 : 26,
                     bottom: hudSpace - (narrow ? 4 : 8), zIndex: 11,
                 }}>
+                    {sectorRow > 0 && (
+                        <div style={{ marginBottom: sectorGap }}>
+                            <SectorCompare
+                                compare={sectorCompare}
+                                sectorTimes={sectorTimes}
+                                currentSector={currentSector}
+                                narrow={narrow}
+                            />
+                        </div>
+                    )}
+
                     <SpeedTrace
                         ref={traceRef} trace={speedTrace} narrow={narrow}
                         height={traceH} pedalHeight={pedalH}

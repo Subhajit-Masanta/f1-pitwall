@@ -42,7 +42,7 @@ const Split = ({ n, locked, active, narrow }) => (
     </div>
 );
 
-const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }, ref) => {
+const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow, compare }, ref) => {
     const clockRef = useRef(null);
 
     useImperativeHandle(ref, () => ({
@@ -50,6 +50,8 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }
             if (clockRef.current) clockRef.current.textContent = fmtLap(fr.time);
         },
     }), []);
+
+    const comparing = !!(compare?.a && compare?.b);
 
     const splits = [1, 2, 3].map((n) => (
         <Split key={n} n={n} narrow={narrow}
@@ -70,7 +72,9 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }
                 }}>
                     {fmtLap(0)}
                 </div>
-                <div style={{ display: 'flex', gap: 12, flex: 1 }}>{splits}</div>
+                {comparing
+                    ? null
+                    : <div style={{ display: 'flex', gap: 12, flex: 1 }}>{splits}</div>}
             </div>
         );
     }
@@ -89,7 +93,10 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow }
             }}>
                 {fmtLap(0)}
             </div>
-            {splits}
+            {/* In head-to-head the splits move to a full-width row under the
+                map — a two-driver table here would cost the map ~60px of
+                width, and the map is the point. */}
+            {comparing ? null : splits}
         </div>
     );
 });
