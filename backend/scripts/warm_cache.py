@@ -23,14 +23,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import fastf1  # noqa: E402
 from database import cache_get, cache_set, check_db_connection  # noqa: E402
-from services.fastf1_service import (  # noqa: E402
-    CACHE_SCHEMA,
-    get_track_data,
-    get_lap_telemetry,
+from services.session_loader import CACHE_SCHEMA  # noqa: E402
+from services.session_data import (  # noqa: E402
     get_race_results,
     get_race_sessions,
     get_session_drivers,
 )
+from services.track_data import get_track_data  # noqa: E402
+from services.lap_data import get_lap_telemetry  # noqa: E402
 
 
 def completed_rounds(year: int):

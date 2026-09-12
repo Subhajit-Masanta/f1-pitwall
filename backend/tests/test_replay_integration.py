@@ -13,11 +13,8 @@ precisely how a couple of them got through in the first place.
 import numpy as np
 import pytest
 
-from services.fastf1_service import (
-    get_track_data,
-    get_lap_telemetry,
-    PLAYBACK_FPS,
-)
+from services.track_data import get_track_data
+from services.lap_data import get_lap_telemetry, PLAYBACK_FPS
 
 pytestmark = pytest.mark.slow
 
@@ -32,13 +29,20 @@ def no_cache():
     Without this the tests read payloads out of MongoDB and would happily pass
     with the maths completely broken — they would be testing the cache, not the
     code. Slower, but it is the difference between a real test and theatre.
+
+    Patched on the `database` MODULE, not on a service module. The services
+    call `database.cache_get(...)` by attribute rather than importing the name,
+    so this one patch covers every service — including ones added later. An
+    earlier version patched `fastf1_service.cache_get`; when the service layer
+    was split, that name moved and the patch would have silently stopped
+    working, quietly putting the cache back in front of the tests.
     """
-    import services.fastf1_service as svc
-    get, set_ = svc.cache_get, svc.cache_set
-    svc.cache_get = lambda key: None
-    svc.cache_set = lambda key, payload: None
+    import database
+    get, set_ = database.cache_get, database.cache_set
+    database.cache_get = lambda key: None
+    database.cache_set = lambda key, payload: None
     yield
-    svc.cache_get, svc.cache_set = get, set_
+    database.cache_get, database.cache_set = get, set_
 
 
 @pytest.fixture(scope="module")

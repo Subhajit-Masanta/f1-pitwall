@@ -4,15 +4,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import check_db_connection, cache_stats
-from services.fastf1_service import (
-    get_race_data_test,
+from services.session_data import (
     get_race_results,
     get_race_calendar,
     get_race_sessions,
-    get_track_data,
-    get_lap_telemetry,
     get_session_drivers,
 )
+from services.track_data import get_track_data
+from services.lap_data import get_lap_telemetry
 
 
 # 1. Startup / shutdown (lifespan replaces the deprecated @app.on_event)
@@ -81,11 +80,6 @@ def root():
 def health():
     """Liveness + cache status — handy after deploying."""
     return {"ok": True, "cache": cache_stats()}
-
-@app.get("/test-data")
-def test_fastf1_integration():
-    """Call our service to fetch F1 data and return it."""
-    return get_race_data_test()
 
 @app.get("/results/{year}/{round}")
 def get_results_endpoint(year: int, round: int, session: str = "R"):
