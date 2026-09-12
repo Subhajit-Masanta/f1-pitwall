@@ -42,7 +42,7 @@ const Split = ({ n, locked, active, narrow }) => (
     </div>
 );
 
-const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow, compare }, ref) => {
+const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow, compare, top = 62 }, ref) => {
     const clockRef = useRef(null);
 
     useImperativeHandle(ref, () => ({
@@ -81,7 +81,9 @@ const SectorTiming = forwardRef(({ sectorTimes, currentSector, visible, narrow, 
 
     return (
         <div style={{
-            position: 'absolute', top: 62, left: 24, zIndex: 12, width: 190,
+            // `top` follows the MEASURED header: it wraps to two rows below
+            // ~1133px, and a fixed 62 put this rail underneath it.
+            position: 'absolute', top, left: 24, zIndex: 12, width: 190,
             opacity: visible ? 1 : 0.45, transition: 'opacity .25s',
         }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.6, color: F1.dim }}>

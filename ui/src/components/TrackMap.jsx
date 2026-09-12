@@ -43,7 +43,25 @@ const TrackMap = ({
     const [showTrace, setShowTrace] = useState(() => {
         try { return localStorage.getItem('pitwall.trace') !== '0'; } catch { return true; }
     });
-    const narrow = useIsNarrow(720);
+    const narrow = useIsNarrow();
+
+    // The stage header wraps (long circuit names, narrow windows), so its
+    // height is measured and reserved rather than assumed — see stageLayout.
+    // A callback ref, not useLayoutEffect: the header renders BELOW the early
+    // returns for loading/error, so a mount effect would fire while the node
+    // is still null and never observe anything.
+    const [headerH, setHeaderH] = useState(0);
+    const headerRoRef = useRef(null);
+    const headerRef = useCallback((el) => {
+        headerRoRef.current?.disconnect();
+        headerRoRef.current = null;
+        if (!el) return;
+        const read = () => setHeaderH(el.offsetHeight);
+        read();
+        headerRoRef.current = new ResizeObserver(read);
+        headerRoRef.current.observe(el);
+    }, []);
+    useEffect(() => () => headerRoRef.current?.disconnect(), []);
 
     const trackRef = useRef(null);
     const hudRef = useRef(null);
@@ -198,6 +216,7 @@ const TrackMap = ({
         showDeltaTrace,
         hasSectorRow: !!sectorCompare,
         hasDeltaPanel: comparing && !!ghost,
+        headerH,
     });
 
     // A head-to-head can't start until BOTH laps are in hand: pressing play with
@@ -221,7 +240,7 @@ const TrackMap = ({
     return (
         <div style={{ ...L.stage, background: F1.bg, border: `1px solid ${F1.line}` }}>
             {/* header */}
-            <div style={{
+            <div ref={headerRef} style={{
                 position: 'absolute', top: 0, left: 0, right: 0, zIndex: 14,
                 display: 'flex', alignItems: 'center', gap: narrow ? 8 : 14,
                 flexWrap: 'wrap', padding: narrow ? '12px 14px' : '16px 22px',
@@ -327,6 +346,7 @@ const TrackMap = ({
                 visible={started}
                 narrow={narrow}
                 compare={sectorCompare}
+                top={L.mapTop + 16}
             />
 
             {/* map + car — inset so nothing sits on top of the track */}
@@ -340,7 +360,7 @@ const TrackMap = ({
             {/* legend — desktop only, it crowds a phone */}
             {!narrow && view === 'speed' && mapLayout.speedRange && (
                 <div style={{
-                    position: 'absolute', right: 22, top: 60, zIndex: 12,
+                    position: 'absolute', right: 22, top: L.mapTop + 14, zIndex: 12,
                     display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
                 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.3, color: F1.dim }}>
@@ -358,7 +378,7 @@ const TrackMap = ({
             )}
             {!narrow && view === 'map' && drsCount > 0 && (
                 <div style={{
-                    position: 'absolute', right: 22, top: 62, zIndex: 12,
+                    position: 'absolute', right: 22, top: L.mapTop + 16, zIndex: 12,
                     display: 'flex', alignItems: 'center', gap: 8,
                 }}>
                     <span style={{ width: 16, height: 2, background: F1.drs }} />

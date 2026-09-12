@@ -19,7 +19,7 @@ const DEFAULT_YEAR = 2026;
  */
 function App() {
   const route = useRoute();
-  const narrow = useIsNarrow(720);
+  const narrow = useIsNarrow();
 
   const { mode, round, a, b } = route;
   const session = route.session || 'Q';

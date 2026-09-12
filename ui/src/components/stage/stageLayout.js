@@ -29,9 +29,11 @@
  * @param showDeltaTrace  the delta chart is showing
  * @param hasSectorRow    the two-driver sector row is showing
  * @param hasDeltaPanel   the delta readout panel is showing
+ * @param headerH         MEASURED height of the stage header, in px
  */
 export const stageLayout = ({
     narrow,
+    headerH = 0,
     traceOpen = false,
     hasPedal = false,
     comparePanels = 0,
@@ -85,17 +87,26 @@ export const stageLayout = ({
     // and the stage grows to match rather than the map shrinking.
     const deltaSpace = (hasDeltaPanel && narrow) ? 86 : 0;
 
-    const mapTop = (narrow ? 90 : 46) + deltaSpace;
+    // The header is the one band whose height is not ours to choose: it wraps
+    // when the circuit name is long or the window is narrow, and at 1024px it
+    // is already TWO rows (98px) against the 46px that used to be reserved —
+    // which is how the driver pickers ended up drawn over the lap clock on a
+    // tablet in portrait. So it is measured, not assumed, and anything beyond
+    // the one-row budget grows the stage rather than eating into the map.
+    const headerBase = narrow ? 90 : 46;
+    const headerExtra = Math.max(0, headerH - headerBase);
+
+    const mapTop = headerBase + headerExtra + deltaSpace;
 
     // The stage GROWS by exactly what is open below it rather than the map
     // giving up space — so the track is the same size in every mode.
     const mapH = narrow ? 68 : 78;
-    const grown = traceBlock + transportSpace + deltaSpace;
+    const grown = traceBlock + transportSpace + deltaSpace + headerExtra;
 
     return {
         hudSpace, traceH, pedalH, deltaH, labelRow, sectorRow, sectorGap,
         traceBlock, bottomSpace, transportSpace, timingSpace, deltaSpace,
-        mapTop, mapBottom,
+        headerBase, headerExtra, mapTop, mapBottom,
         stage: {
             position: 'relative', width: '100%',
             height: `calc(${mapH}vh + ${grown}px)`,
