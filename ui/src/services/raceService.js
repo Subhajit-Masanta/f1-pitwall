@@ -23,6 +23,14 @@ export const raceService = {
     getTelemetry: async (year, round, session, driverId = 'fastest') =>
         (await api.get(`/telemetry/${year}/${round}/${session}/${driverId}`)).data,
 
+    /**
+     * A whole race: every car's position at 2 Hz, the running order, tyre
+     * stints, pit stops, the SC/VSC/red-flag timeline and weather.
+     * ~1.2 MB gzipped, so this is one request and then everything is local.
+     */
+    getRace: async (year, round, session = 'R') =>
+        (await api.get(`/race/${year}/${round}/${session}`)).data,
+
     /** Is the backend awake? */
     checkHealth: async () => (await api.get('/')).data,
 };

@@ -16,7 +16,9 @@ import {
 import { F1, MONO, speedColor } from '../../theme';
 import CarLayer from './CarLayer';
 
-const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref) => {
+const TrackCanvas = memo(forwardRef(({
+    mapLayout, view = 'map', cars = [], pitBox = null, parkAtStart = true,
+}, ref) => {
     const wrapRef = useRef(null);
     const layerRef = useRef(null);
     const proj = useRef({ scale: 1, offX: 0, offY: 0 });
@@ -66,17 +68,25 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref
     }, [recompute, move]);
 
     // Park the car on the start/finish line until the lap begins.
+    //
+    // `parkAtStart` exists because this puts EVERY car on one coordinate — the
+    // midpoint of the start line — which is right for a lap or a head-to-head
+    // and wrong for a race. With twenty cars it stacked the whole field on a
+    // single dot, and because this effect runs on [mapLayout, cars] it did so
+    // AFTER the caller had placed them, silently overwriting a starting grid.
+    // Race mode parks its own cars and opts out.
     useEffect(() => {
+        if (!parkAtStart) return;
         const t = mapLayout?.ticks?.start;
         if (t) {
             recompute();
             cars.forEach((c) => move(c.id, (t.x1 + t.x2) / 2, (t.y1 + t.y2) / 2));
         }
-    }, [mapLayout, recompute, move, cars]);
+    }, [mapLayout, recompute, move, cars, parkAtStart]);
 
     if (!mapLayout) return null;
 
-    const { viewBox, d, mapSize, ticks, drsPaths, corners, speedSegments } = mapLayout;
+    const { viewBox, d, pitPath, mapSize, ticks, drsPaths, corners, speedSegments } = mapLayout;
     const lw = mapSize * 0.0055;          // track line: thin
     const label = mapSize * 0.017;
     const speedView = view === 'speed' && speedSegments?.length > 0;
@@ -152,6 +162,24 @@ const TrackCanvas = memo(forwardRef(({ mapLayout, view = 'map', cars = [] }, ref
                             </g>
                         ))}
                     </>
+                )}
+
+                {/* THE PIT LANE, drawn at an exaggerated offset — see
+                    pit_geometry.py for why an accurate one is invisible. Dashed
+                    and dimmer than the track so it reads as a service road
+                    rather than a second racing line. */}
+                {pitPath && (
+                    <g>
+                        <path d={pitPath} fill="none" stroke={F1.bg}
+                            strokeWidth={lw * 2.4} strokeLinecap="round" />
+                        <path d={pitPath} fill="none" stroke={F1.faint}
+                            strokeWidth={lw * 0.85} strokeLinecap="round"
+                            strokeDasharray={`${lw * 3} ${lw * 2}`} />
+                        {pitBox && (
+                            <circle cx={pitBox.X} cy={-pitBox.Y} r={mapSize * 0.006}
+                                fill="none" stroke={F1.dim} strokeWidth={lw * 0.7} />
+                        )}
+                    </g>
                 )}
 
                 {/* sector + start-finish ticks */}

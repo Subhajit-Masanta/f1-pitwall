@@ -38,7 +38,17 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #   v8 — added team_color to telemetry + the /drivers picker payload
 #   v9 — the playback timeline now lands exactly on the lap time; np.arange
 #        stopped up to one frame short, so every replay ended early
-CACHE_SCHEMA = "v9"
+#  v10 — race payloads: added lap_starts and per-driver crossings, and moved
+#        every time field onto ONE base (seconds since the race start) instead
+#        of mixing frame-indexed cars with absolute session time
+#  v11 — pit-lane displacement is applied over a PADDED window, so a car
+#        eases into the lane instead of stepping ~42 m sideways in one frame
+#  v12 — retirement is derived from the last lap time instead of pos_data
+#        Status (which reads OnTrack for everyone, always), plus grid slot
+#        and classification status per driver
+#  v13 — out_at takes the EARLIER of the last lap time and the start of the
+#        lap after their last; a red flag makes the time alone unreliable
+CACHE_SCHEMA = "v13"
 
 
 # ---------------------------------------------------------------------------

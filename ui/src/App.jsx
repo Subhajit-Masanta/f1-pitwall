@@ -6,6 +6,7 @@ import Landing from './components/Landing';
 import RaceSelector from './components/RaceSelector';
 import TrackMap from './components/TrackMap';
 import RaceResults from './components/RaceResults';
+import RaceStage from './components/race/RaceStage';
 import FpsMeter from './components/FpsMeter';
 import { F1, MAXW } from './theme';
 import { useRoute, navigate, buildPath, MODE_LABEL } from './lib/router';
@@ -115,9 +116,14 @@ function App() {
           )}
 
           {round && mode === 'race' && (
-            <div style={{ marginTop: 18 }}>
-              <RaceResults year={year} round={round} raceName={raceInfo?.name} />
-            </div>
+            <>
+              <div style={{ marginTop: 18 }}>
+                <RaceStage year={year} round={round} raceName={raceInfo?.name} />
+              </div>
+              <div style={{ marginTop: 18 }}>
+                <RaceResults year={year} round={round} raceName={raceInfo?.name} />
+              </div>
+            </>
           )}
         </>
       )}

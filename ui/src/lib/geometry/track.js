@@ -4,7 +4,14 @@
  * The viewBox, the outline path, sector ticks, DRS overlays, corner-number
  * placement and the speed-coloured segments. Pure: track data in, geometry out.
  */
-export const buildMapLayout = (trackData, sectorBoundaries) => {
+/**
+ * @param pitLane  optional [{X, Y}] — the derived pit lane. It is drawn as its
+ *                 own path AND folded into the bounds, because it sits outside
+ *                 the circuit: measured 50-130 m beyond the outline once
+ *                 amplified, which a viewBox fitted to the track alone clips
+ *                 straight off.
+ */
+export const buildMapLayout = (trackData, sectorBoundaries, pitLane = null) => {
     if (!trackData?.track_points?.length) return null;
 
     const pts = trackData.track_points
@@ -13,8 +20,13 @@ export const buildMapLayout = (trackData, sectorBoundaries) => {
 
     if (pts.length < 2) return null;
 
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
+    const pit = (pitLane || [])
+        .filter((p) => Number.isFinite(p.X) && Number.isFinite(p.Y))
+        .map((p) => ({ x: p.X, y: -p.Y }));
+
+    const bounds = pts.concat(pit);
+    const xs = bounds.map((p) => p.x);
+    const ys = bounds.map((p) => p.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs);
     const minY = Math.min(...ys), maxY = Math.max(...ys);
     const width = maxX - minX;
@@ -28,6 +40,8 @@ export const buildMapLayout = (trackData, sectorBoundaries) => {
         ? `M ${arr.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`
         : '');
     const d = `${toPath(pts)} Z`;
+    // Open path, not closed: a pit lane runs from entry to exit, it is not a loop.
+    const pitPath = pit.length > 1 ? toPath(pit) : '';
 
     const idxNearest = (dist) => {
         let bi = 0, bd = Infinity;
@@ -178,7 +192,7 @@ export const buildMapLayout = (trackData, sectorBoundaries) => {
     }
 
     return {
-        viewBox, d, mapSize, ticks, drsPaths, corners,
+        viewBox, d, pitPath, mapSize, ticks, drsPaths, corners,
         hasSectors: !!b, speedSegments, speedRange,
     };
 };

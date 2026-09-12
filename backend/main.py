@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from database import check_db_connection, cache_stats
 from services.session_data import (
     get_race_results,
@@ -12,6 +13,7 @@ from services.session_data import (
 )
 from services.track_data import get_track_data
 from services.lap_data import get_lap_telemetry
+from services.race_data import get_race_data
 
 
 # 1. Startup / shutdown (lifespan replaces the deprecated @app.on_event)
@@ -40,6 +42,14 @@ and acts as the Router that maps incoming HTTP requests to the specific controll
 # so we never use "*". Local dev always allowed; production origins come from ALLOWED_ORIGINS
 # (comma-separated), e.g. "https://f1replay.pages.dev,https://f1.example.com".
 _extra = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+# Compress responses. FastAPI does NOT do this by default, and without it the
+# race payload goes over the wire at its raw size: measured 6.83 MB instead of
+# 1.21 MB for 2023 Australia. Everything about the 2 Hz sample rate was chosen
+# against the gzipped figure, so shipping it uncompressed threw that away.
+# minimum_size skips the tiny JSON replies, where a gzip header costs more than
+# it saves.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.add_middleware(
     CORSMiddleware,
@@ -125,3 +135,13 @@ def get_telemetry_endpoint(year: int, round: int, session: str, driver: str):
     Get telemetry for a specific driver.
     """
     return get_lap_telemetry(year, round, session, driver)
+
+
+@app.get("/race/{year}/{round}/{session}")
+def get_race_endpoint(year: int, round: int, session: str = "R"):
+    """
+    A whole race, resampled for playback: every car's position, the running
+    order, tyre stints, pit stops, the SC/VSC/red-flag timeline and weather.
+    Example: /race/2023/3/R
+    """
+    return get_race_data(year, round, session)
