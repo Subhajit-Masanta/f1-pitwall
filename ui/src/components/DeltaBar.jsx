@@ -18,7 +18,7 @@ const FULL_SCALE_S = 1.0;
 const Plate = ({ code, team, color, dashed }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
         <span style={{
-            width: 4, height: 22, flexShrink: 0, background: color,
+            width: 4, height: 22, flexShrink: 0, backgroundColor: color,
             // Teammates share a team colour, so the compared driver gets a
             // broken bar to stay distinguishable in an intra-team battle.
             backgroundImage: dashed

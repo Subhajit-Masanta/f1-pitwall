@@ -5,7 +5,7 @@
  * imperative children (car, HUD, timing) so playback never re-renders.
  */
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Play, Pause, RotateCcw, Activity } from 'lucide-react';
+import { Play, Pause, Activity } from 'lucide-react';
 
 import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
@@ -22,49 +22,8 @@ import SpeedTrace from './SpeedTrace';
 import DeltaBar from './DeltaBar';
 import SectorCompare from './SectorCompare';
 import StageMessage from './StageMessage';
-
-/**
- * One driver slot in a head-to-head. Both slots use this, so neither is
- * privileged — the "reference" is just whichever driver sits in slot A.
- */
-const DriverPicker = ({
-    slot, value, drivers, exclude, color, loading, placeholder, prefix, onChange,
-}) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        {prefix && (
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: F1.faint }}>
-                {prefix}
-            </span>
-        )}
-        <select
-            value={value}
-            onChange={(e) => onChange?.(slot, e.target.value || null)}
-            disabled={loading || drivers.length === 0}
-            style={{
-                padding: '5px 8px', fontSize: 11, fontWeight: 600,
-                letterSpacing: 0.4, background: F1.bg,
-                color: value ? F1.text : F1.dim,
-                // the select itself carries the driver's team colour
-                border: `1px solid ${color || F1.line}`,
-                cursor: loading ? 'wait' : 'pointer', maxWidth: 190,
-            }}
-        >
-            <option value="">
-                {drivers.length === 0
-                    ? 'Loading drivers…'
-                    : loading ? 'Loading driver…' : (placeholder || '— pick a driver —')}
-            </option>
-            {drivers
-                // can't race a driver against himself
-                .filter((d) => d.number !== exclude)
-                .map((d) => (
-                    <option key={d.number} value={d.number}>
-                        {d.code} · {d.gap > 0 ? `+${d.gap.toFixed(3)}` : d.gap.toFixed(3)}
-                    </option>
-                ))}
-        </select>
-    </div>
-);
+import DriverPicker from './stage/DriverPicker';
+import Transport from './stage/Transport';
 
 const TrackMap = ({
     year, round, session, raceName,
@@ -450,59 +409,21 @@ const TrackMap = ({
 
             <TelemetryHUD ref={hudRef} narrow={narrow} />
 
-            {/* transport — sits ABOVE the trace block, floating over the foot of
-                the map. Offsetting INTO bottomSpace put it on top of the speed
-                chart once the pedal band made that block taller. */}
-            <div style={{
-                position: 'absolute', bottom: L.bottomSpace + 8, left: '50%',
-                transform: 'translateX(-50%)', zIndex: 16,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-            }}>
-                {replayError && (
-                    <div style={{
-                        fontSize: 12, color: F1.red, letterSpacing: 0.3,
-                        maxWidth: 300, textAlign: 'center', lineHeight: 1.5,
-                    }}>
-                        {replayError}
-                    </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <button
-                        onClick={isPlaying ? pause : handleStart}
-                        disabled={transport.disabled}
-                        style={{
-                            ...btn,
-                            opacity: transport.disabled ? 0.55 : 1,
-                            cursor: transport.busy ? 'wait' : transport.disabled ? 'not-allowed' : 'pointer',
-                        }}
-                    >
-                        {transport.icon}{transport.label}
-                    </button>
-                    {started && !isPlaying && !finished && (
-                        <button onClick={restart} style={iconBtn} title="Restart lap">
-                            <RotateCcw size={14} />
-                        </button>
-                    )}
-                </div>
-            </div>
+            <Transport
+                state={transport}
+                bottom={L.bottomSpace + 8}
+                error={replayError}
+                isPlaying={isPlaying}
+                onToggle={isPlaying ? pause : handleStart}
+                onRestart={restart}
+                canRestart={started && !finished}
+            />
         </div>
     );
 };
 
-const btn = {
-    display: 'flex', alignItems: 'center', gap: 8,
-    background: F1.red, color: '#fff', border: 'none',
-    padding: '11px 24px', cursor: 'pointer',
-    fontSize: 12, fontWeight: 700, letterSpacing: 1.5,
-};
 
 // NOTE: not `ghost` — that name is taken inside the component by the compared
 // driver, which shadowed this style and was handed to the button as its CSS.
-const iconBtn = {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 34, height: 34,
-    background: 'transparent', color: F1.dim,
-    border: `1px solid ${F1.line}`, cursor: 'pointer',
-};
 
 export default TrackMap;

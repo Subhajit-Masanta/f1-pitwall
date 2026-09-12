@@ -85,7 +85,7 @@ const PedalPanel = ({ geom, title, subtitle, color, height, sectorX, headRef, fi
                 left={
                     <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                         <span style={{
-                            width: 3, height: 12, background: color,
+                            width: 3, height: 12, backgroundColor: color,
                             backgroundImage: dashed
                                 ? `repeating-linear-gradient(180deg, ${color} 0 3px, rgba(0,0,0,0.6) 3px 5px)`
                                 : 'none',
