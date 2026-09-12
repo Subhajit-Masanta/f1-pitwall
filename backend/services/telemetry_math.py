@@ -140,7 +140,7 @@ def drs_zones(tel, min_length_m: float = 120.0):
     FastF1 DRS codes: 0/1 = closed, 8 = eligible (past detection),
     10/12/14 = open. We merge contiguous "open" samples and drop blips.
     """
-    return _mask_to_zones(tel["DRS"].to_numpy() >= 10, tel, min_length_m)
+    return mask_to_zones(tel["DRS"].to_numpy() >= 10, tel, min_length_m)
 
 
 def brake_zones(tel, min_length_m: float = 25.0):
@@ -153,10 +153,10 @@ def brake_zones(tel, min_length_m: float = 25.0):
     only ~30 m but it is exactly the thing worth seeing on the trace.
     """
     brake = np.nan_to_num(tel["Brake"].to_numpy().astype(float))
-    return _mask_to_zones(brake > 0.5, tel, min_length_m)
+    return mask_to_zones(brake > 0.5, tel, min_length_m)
 
 
-def _mask_to_zones(mask, tel, min_length_m: float):
+def mask_to_zones(mask, tel, min_length_m: float):
     """Merge contiguous True samples into {start, end} distance ranges."""
     dist = tel["Distance"].to_numpy().astype(float)
 
