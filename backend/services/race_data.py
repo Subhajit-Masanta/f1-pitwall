@@ -135,10 +135,21 @@ def _merge_stints(laps):
             comp = str(r.Compound or "UNKNOWN")
             life = None if r.TyreLife is None or np.isnan(r.TyreLife) else int(r.TyreLife)
             lap = int(r.LapNumber)
-            if runs and runs[-1]["compound"] == comp and (
-                life is None or runs[-1]["life_end"] is None
-                or life >= runs[-1]["life_end"]
-            ):
+            # Same compound AND the wear count carries on = the same physical
+            # set, so the split is a stint-number artifact of a restart.
+            #
+            # The tolerance matters: FastF1 DECREMENTS TyreLife by one across a
+            # red-flag restart rather than continuing it. Measured at Australia
+            # 2023, Alonso reads SOFT life 5, 6, then 5 — a used tyre cannot
+            # un-wear, so that is one set mis-numbered as two. A genuinely new
+            # set resets the count outright (de Vries drops 9 -> 5), which is
+            # well outside this window.
+            prev_life = runs[-1]["life_end"] if runs else None
+            same_set = (
+                life is None or prev_life is None
+                or (prev_life - 1) <= life <= (prev_life + 2)
+            )
+            if runs and runs[-1]["compound"] == comp and same_set:
                 runs[-1]["to"] = lap
                 runs[-1]["life_end"] = life
             else:
@@ -149,7 +160,7 @@ def _merge_stints(laps):
                 })
         out[str(num)] = [
             {"compound": x["compound"], "from": x["from"], "to": x["to"],
-             "fresh": x["fresh"]}
+             "fresh": x["fresh"], "life": x["life_start"]}
             for x in runs
         ]
     return out
@@ -453,17 +464,37 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
 
     pit_detail = _pit_detail(session, stops_all, spans)
 
-    # --- per-driver lap crossings, for the tower's gap column -------------
-    # `order` gives POSITION per lap but no times, so a gap cannot be derived
-    # from it. This is 20 drivers x ~58 laps, a couple of KB gzipped.
+    # --- per-driver timing points, for the tower's interval column --------
+    # SECTOR crossings, not lap crossings. `order` gives POSITION per lap but
+    # no times, so a gap cannot come from it — and lap crossings alone are far
+    # too coarse: one timing point per driver per lap left the interval column
+    # frozen for a minute and a half at a time, and produced nothing at all for
+    # the whole of lap one. Sectors give 2893 points instead of 1003, with the
+    # first arriving 55 s into lap 1 rather than 98 s.
+    #
+    # `progress` is fractional laps: sector 2 of lap 4 is 3 + 2/3. The race
+    # start is seeded as progress 0 so there is a reference from the moment the
+    # lights go out, rather than a dead column until the first sector.
     crossings = {}
     for num in laps["DriverNumber"].unique():
-        rows = []
+        rows = [[0.0, t0]]
         for r in laps.pick_drivers(num).sort_values("LapNumber").itertuples():
-            t = getattr(r, "Time", None)
-            if t is not None and str(t) != "NaT":
-                rows.append([int(r.LapNumber), float(t.total_seconds())])
-        crossings[str(num)] = rows
+            lap_no = int(r.LapNumber)
+            for i in (1, 2, 3):
+                v = getattr(r, f"Sector{i}SessionTime", None)
+                if v is not None and str(v) != "NaT":
+                    rows.append([round(lap_no - 1 + i / 3.0, 4),
+                                 float(v.total_seconds())])
+        # Sort by TIME and keep progress monotonic: a sector time that arrives
+        # out of order (it happens around red flags) would otherwise make the
+        # interpolation run backwards.
+        rows.sort(key=lambda z: z[1])
+        clean = []
+        for prog, tt in rows:
+            if clean and prog <= clean[-1][0]:
+                continue
+            clean.append([prog, tt])
+        crossings[str(num)] = clean
 
     # --- when each lap began, for the leader ------------------------------
     # `order` carries no timestamps, so without this the frontend cannot tell
@@ -527,10 +558,15 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
     crossings = {k: [[lap, sh(t)] for lap, t in v] for k, v in crossings.items()}
     for drv in drivers:
         drv["out_at"] = sh(out_at.get(drv["number"], t_end))
+    # Both streams run past the chequered flag — the SESSION continues after
+    # the race does. Anything outside the replay window can never be reached by
+    # the clock, so it is dead weight in the payload and a trap for any code
+    # that assumes t is in range.
+    span_end = round(float(grid[-1] - t0), 1) if len(grid) else 0.0
     messages = [{**m, "t": sh(m["t"])} for m in messages
-                if m["t"] is None or sh(m["t"]) >= 0]
+                if m["t"] is None or 0 <= sh(m["t"]) <= span_end]
     weather = [{**w, "t": sh(w["t"])} for w in weather
-               if w["t"] is not None and sh(w["t"]) >= 0]
+               if w["t"] is not None and 0 <= sh(w["t"]) <= span_end]
     pits = [{**q, "t": sh(q["t"])} for q in pit_detail]
 
     result = trim({

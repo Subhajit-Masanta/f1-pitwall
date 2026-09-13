@@ -48,7 +48,11 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        and classification status per driver
 #  v13 — out_at takes the EARLIER of the last lap time and the start of the
 #        lap after their last; a red flag makes the time alone unreliable
-CACHE_SCHEMA = "v13"
+#  v14 — timing points are SECTOR crossings seeded with the race start, so the
+#        interval column works from lights-out instead of from the end of lap 1
+#  v15 — stints merge across a red-flag restart even when FastF1 decrements
+#        TyreLife by one; weather and messages trimmed to the replay window
+CACHE_SCHEMA = "v15"
 
 
 # ---------------------------------------------------------------------------

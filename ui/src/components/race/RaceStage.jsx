@@ -28,7 +28,7 @@ import { raceService } from '../../services/raceService';
 import { buildMapLayout } from '../../lib/geometry/track';
 import {
     buildRace, carAt, statusAt, lapAt, messagesUpTo, weatherAt,
-    orderByLap, leaderAt, safetyCarAt, gridSlots, GRID_BLEND_S,
+    standingsAt, safetyCarAt, gridSlots, GRID_BLEND_S,
 } from '../../lib/race';
 import { F1, MONO } from '../../theme';
 
@@ -88,7 +88,6 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         { id: 'sc', color: '#FFD024', shape: 'ring', label: 'SC' },
     ], [race]);
 
-    const byLap = useMemo(() => (race ? orderByLap(race) : new Map()), [race]);
     const grid = useMemo(() => (race ? gridSlots(race) : new Map()), [race]);
 
     const mapLayout = useMemo(
@@ -141,8 +140,11 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         statusCursor.current = index;
         setStatus((prev) => (prev === span ? prev : span));
 
-        // The safety car, derived from the leader — see safetyCarAt.
-        const sc = safetyCarAt(race, t, span, leaderAt(byLap, L));
+        // The safety car runs ahead of whoever is leading ON THE ROAD, which
+        // is the same standings the tower shows — not the last lap's result.
+        const sc = span?.code === '4'
+            ? safetyCarAt(race, t, span, standingsAt(race, t).order[0])
+            : null;
         if (sc) trackRef.current?.move('sc', sc.x, -sc.y);
         else trackRef.current?.move('sc', null, null);
 
@@ -156,7 +158,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 ? `${w.track.toFixed(0)}°C TRACK · ${w.air.toFixed(0)}°C AIR${w.rain ? ' · RAIN' : ''}`
                 : '';
         }
-    }, [race, byLap, grid]);
+    }, [race, grid]);
 
     const clock = useClock({
         duration: race?.duration || 0,
@@ -208,7 +210,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
 
     const towerWidth = narrow ? 0 : 232;
 
-    return (
+    const stage = (
         <div style={{
             position: 'relative', width: '100%',
             height: `calc(${narrow ? 74 : 80}vh)`,
@@ -274,7 +276,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                             fontVariantNumeric: 'tabular-nums',
                         }}>0:00</span>
                     </div>
-                    <TimingTower race={race} lap={lap} second={second} narrow={narrow} />
+                    <TimingTower race={race} lap={lap} second={second} status={status} narrow={narrow} />
                 </div>
             )}
 
@@ -360,6 +362,38 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 </div>
             </div>
         </div>
+    );
+
+    if (!narrow) return stage;
+
+    // On a narrow layout the tower cannot sit beside the map — there is no
+    // column for it — but hiding it removed the running order altogether,
+    // which is the whole point of a race replay. It goes underneath instead,
+    // where it costs the map nothing.
+    return (
+        <>
+            {stage}
+            <div style={{
+                marginTop: 10, padding: '10px 12px 12px',
+                background: F1.panel, border: `1px solid ${F1.line}`,
+            }}>
+                <div style={{
+                    display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7,
+                }}>
+                    <span style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: 1.4, color: F1.dim,
+                    }}>ORDER</span>
+                    <span style={{
+                        fontFamily: MONO, fontSize: 13, fontWeight: 700, color: F1.text,
+                        fontVariantNumeric: 'tabular-nums',
+                    }}>
+                        LAP {lap}<span style={{ color: F1.faint }}>/{race.totalLaps}</span>
+                    </span>
+                </div>
+                <TimingTower race={race} lap={lap} second={second}
+                    status={status} narrow={narrow} />
+            </div>
+        </>
     );
 };
 

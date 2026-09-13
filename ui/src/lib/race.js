@@ -208,13 +208,24 @@ export const pitsFor = (race, num) => race.pits.filter((p) => p.driver === num);
  */
 const SHOWN = new Set(['Flag', 'SafetyCar', 'Drs', 'CarEvent']);
 
+// A blue flag is a courtesy to one backmarker, not a change in the state of
+// the race — and there are a lot of them: 12 of the 21 flag messages at
+// Australia 2023, each naming a car and an absolute wall-clock time. Left in,
+// they dominate the caption and read as noise during a replay.
+const NOISE_FLAGS = new Set(['BLUE']);
+
+// "... TIMED AT 16:17:17" is the wall clock of the original session, which
+// means nothing next to a replay clock showing 39:02.
+const stripStamp = (msg) => String(msg || '').replace(/\s*TIMED AT\s+[\d:]+\s*$/i, '');
+
 export const messagesUpTo = (race, t, limit = 4) => {
     const out = [];
     for (let i = race.messages.length - 1; i >= 0; i--) {
         const m = race.messages[i];
         if (m.t == null || m.t > t) continue;
         if (!SHOWN.has(m.cat)) continue;
-        out.push(m);
+        if (NOISE_FLAGS.has(m.flag)) continue;
+        out.push({ ...m, msg: stripStamp(m.msg) });
         if (out.length >= limit) break;
     }
     return out;
@@ -293,25 +304,47 @@ export const SC_TRANSIT_S = 5;
  * car on track at all; it is a delta every driver has to respect. Drawing one
  * would be inventing a vehicle that was never there.
  */
+/** Index of the track point nearest (x, y). The outline is ~500 points. */
+const nearestTrackIndex = (pts, x, y) => {
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+        const dx = pts[i].X - x, dy = pts[i].Y - y;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+};
+
 export const safetyCarAt = (race, t, span, leaderNum) => {
     if (!span || span.code !== '4') return null;
     const leader = race.byNumber[leaderNum];
     if (!leader) return null;
 
     const ahead = carAt(leader, race, Math.min(t + SC_LEAD_S, race.duration));
+    const pts = race.track;
     const exit = race.pitLane.length ? race.pitLane[race.pitLane.length - 1] : null;
-    if (!exit) return { x: ahead.x, y: ahead.y };
-
-    const blend = (k) => ({
-        x: exit.X + (ahead.x - exit.X) * k,
-        y: exit.Y + (ahead.y - exit.Y) * k,
-    });
+    if (!pts?.length || !exit) return { x: ahead.x, y: ahead.y };
 
     const since = t - span.start;
     const until = span.end - t;
-    if (since < SC_TRANSIT_S) return blend(Math.max(0, since) / SC_TRANSIT_S);
-    if (until < SC_TRANSIT_S) return blend(Math.max(0, until) / SC_TRANSIT_S);
-    return { x: ahead.x, y: ahead.y };
+    let k = 1;
+    if (since < SC_TRANSIT_S) k = Math.max(0, since) / SC_TRANSIT_S;
+    else if (until < SC_TRANSIT_S) k = Math.max(0, until) / SC_TRANSIT_S;
+    if (k >= 1) return { x: ahead.x, y: ahead.y };
+
+    // ALONG THE TRACK, not across the map. Interpolating x/y straight from the
+    // pit exit to the leader drew a chord through the middle of the circuit —
+    // the safety car appeared in open space and flew across the infield, which
+    // is what "coming out of nowhere" looked like. Both ends sit on the racing
+    // line (the derived lane's ends measure 0 units from it), so walking the
+    // outline between them keeps the car on the road the whole way out and the
+    // whole way back in.
+    const n = pts.length;
+    const ei = nearestTrackIndex(pts, exit.X, exit.Y);
+    const li = nearestTrackIndex(pts, ahead.x, ahead.y);
+    const forward = (li - ei + n) % n;
+    const p = pts[Math.round(ei + forward * k) % n];
+    return { x: p.X, y: p.Y };
 };
 
 /** The driver number leading on `lap`, or null. */
@@ -372,6 +405,31 @@ const timeAtProgress = (rows, p) => {
  * The leader is whoever has the most progress, not a lookup: that keeps the
  * reference self-consistent at the moment the lead changes.
  */
+/**
+ * The live classification AND the gaps behind it, from one pass.
+ *
+ * These have to come from the same calculation. Ordering rows by the last
+ * COMPLETED lap while showing gaps computed per second put the two in
+ * disagreement for most of the race — measured, 718 samples where a lower row
+ * showed a smaller gap than the row above it, because a car had passed on the
+ * road and the order would not catch up until the next time it crossed the
+ * line. Position on the road is what a timing tower reports, so both come from
+ * progress.
+ */
+export const standingsAt = (race, t) => {
+    const gaps = intervalsAt(race, t);
+    const order = Object.keys(race.crossings).sort((a, b) => {
+        const ga = gaps.get(a), gb = gaps.get(b);
+        if (ga == null && gb == null) {
+            return (race.byNumber[a]?.grid || 99) - (race.byNumber[b]?.grid || 99);
+        }
+        if (ga == null) return 1;
+        if (gb == null) return -1;
+        return ga - gb;
+    });
+    return { order, gaps };
+};
+
 export const intervalsAt = (race, t) => {
     const prog = new Map();
     let leadRows = null;
@@ -383,11 +441,12 @@ export const intervalsAt = (race, t) => {
     }
     const out = new Map();
     for (const [num, rows] of Object.entries(race.crossings)) {
-        // Before a driver has completed a lap there is no timing reference at
-        // all, so there is no gap to report. Returning 0 there showed every
-        // one of the twenty cars as LEADER for the whole of lap one.
-        if (!rows.length || t < rows[0][1]) { out.set(num, null); continue; }
-        const tl = leadRows ? timeAtProgress(leadRows, prog.get(num)) : null;
+        // Progress of zero means the car has not registered any timing yet —
+        // at lights-out, or for a driver who never reached a sector marker.
+        // Reporting 0 seconds there showed all twenty cars as LEADER.
+        const p = prog.get(num);
+        if (!rows.length || !(p > 0)) { out.set(num, null); continue; }
+        const tl = leadRows ? timeAtProgress(leadRows, p) : null;
         out.set(num, tl == null ? null : Math.max(0, t - tl));
     }
     return out;
@@ -448,9 +507,26 @@ export const gridSlots = (race) => {
         return { x: pts[bi].X, y: pts[bi].Y, nx: -ty / m, ny: tx / m };
     };
 
+    // A GRID POSITION OF ZERO IS NOT MISSING DATA — it is a pit-lane start,
+    // and F1 records it as 0. Treating it as falsy dropped Ocon out of the
+    // Azerbaijan sprint grid entirely. He starts from the pit lane, so that is
+    // where he is put; with no derived lane, he lines up behind the last row.
+    const maxRow = Math.ceil(
+        Math.max(1, ...race.cars.map((c) => c.grid || 0)) / 2,
+    );
     for (const c of race.cars) {
         const g = c.grid;
-        if (!g || g < 1) continue;
+        if (g == null || g < 0) continue;
+        if (g === 0) {
+            const lane = race.pitLane;
+            if (lane?.length) {
+                out.set(c.number, { x: lane[0].X, y: lane[0].Y });
+            } else {
+                const p = at(total - (maxRow + 1) * ROW);
+                out.set(c.number, { x: p.x, y: p.y });
+            }
+            continue;
+        }
         const row = Math.ceil(g / 2);
         const side = g % 2 === 1 ? -1 : 1;      // pole on one side, P2 the other
         const p = at(total - row * ROW);        // behind the start line

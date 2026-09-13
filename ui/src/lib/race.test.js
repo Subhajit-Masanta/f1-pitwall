@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     buildRace, frameAt, statusAt, orderByLap, lapCrossings, lapAt,
     stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
-    carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots,
+    carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -28,8 +28,8 @@ const payload = () => ({
     },
     lap_starts: [[1, 0], [2, 0.8], [3, 1.6]],
     crossings: {
-        '1': [[1, 0.8], [2, 1.6], [3, 2.4]],
-        '16': [[1, 1.0], [2, 1.5], [3, 2.9]],
+        '1': [[0, 0], [1, 0.8], [2, 1.6], [3, 2.4]],
+        '16': [[0, 0], [1, 1.0], [2, 1.5], [3, 2.9]],
     },
     order: [
         [1, '1', 1], [1, '16', 2],
@@ -54,6 +54,8 @@ const payload = () => ({
         { t: 0.5, lap: 1, cat: 'Flag', flag: 'YELLOW', scope: 'Sector', msg: 'YELLOW IN SECTOR 3' },
         { t: 1.0, lap: 2, cat: 'SafetyCar', flag: '', scope: '', msg: 'SAFETY CAR DEPLOYED' },
         { t: 1.9, lap: 3, cat: 'Flag', flag: 'GREEN', scope: 'Track', msg: 'GREEN LIGHT' },
+        { t: 1.95, lap: 3, cat: 'Flag', flag: 'BLUE', scope: 'Driver',
+          msg: 'WAVED BLUE FLAG FOR CAR 2 (SAR) TIMED AT 16:17:17' },
     ],
     weather: [
         { t: 0, air: 17, track: 35, rain: false },
@@ -214,6 +216,22 @@ describe('messagesUpTo', () => {
         expect(m.map((x) => x.msg)).toEqual(['SAFETY CAR DEPLOYED', 'YELLOW IN SECTOR 3']);
     });
 
+    it('drops blue flags, which are per-car courtesy, not race state', () => {
+        // 12 of the 21 flag messages at Australia 2023 are blue flags; left in
+        // they take over the caption line.
+        const r = buildRace(payload());
+        const m = messagesUpTo(r, 2.0, 4);
+        expect(m.some((x) => x.flag === 'BLUE')).toBe(false);
+    });
+
+    it('strips the original wall-clock stamp from a caption', () => {
+        const p = payload();
+        p.messages.push({ t: 1.2, lap: 2, cat: 'CarEvent', flag: '', scope: '',
+                          msg: 'CAR 1 (VER) OFF TRACK TIMED AT 16:17:17' });
+        const m = messagesUpTo(buildRace(p), 1.3, 1);
+        expect(m[0].msg).toBe('CAR 1 (VER) OFF TRACK');
+    });
+
     it('returns newest first and respects the limit', () => {
         const r = buildRace(payload());
         const m = messagesUpTo(r, 2.0, 1);
@@ -358,23 +376,57 @@ describe('safetyCarAt', () => {
         expect(Number.isFinite(p.x)).toBe(true);
     });
 
-    it('emerges from the pit exit rather than blinking into place', () => {
-        const r = buildRace(payload());
-        const exit = r.pitLane[r.pitLane.length - 1];
-        const atStart = safetyCarAt(r, 0, sc, '1');
-        expect(atStart.x).toBeCloseTo(exit.X, 4);
-        expect(atStart.y).toBeCloseTo(exit.Y, 4);
-        // and has moved away from it a moment later
-        const later = safetyCarAt(r, SC_TRANSIT_S * 0.5, sc, '1');
-        expect(Math.abs(later.x - exit.X)).toBeGreaterThan(0);
+    it('stays ON the track while coming out and going back in', () => {
+        // The bug this pins: interpolating x/y from the pit exit to the leader
+        // drew a straight chord across the infield, so the safety car appeared
+        // in open space and flew over the middle of the circuit.
+        //
+        // The leader is placed on the OPPOSITE side of the ring from the pit
+        // exit, which is where a chord is at its worst — it passes through the
+        // centre, a full radius off the track. A leader near the exit would
+        // let the chord hug the ring and prove nothing.
+        const p = payload();
+        const R = 100;
+        const ring = [];
+        for (let i = 0; i < 72; i++) {
+            const a = (i / 72) * Math.PI * 2;
+            ring.push({ X: Math.cos(a) * R, Y: Math.sin(a) * R, D: i * 10 });
+        }
+        p.track_points = ring;
+        p.pit_lane = [{ X: 0, Y: R }, { X: R, Y: 0 }];        // exit at angle 0
+        const opposite = Math.PI * 0.95;                       // leader far side
+        p.cars['1'] = {
+            x: [0, 1, 2, 3, 4].map((k) => Math.cos(opposite + k * 0.01) * R),
+            y: [0, 1, 2, 3, 4].map((k) => Math.sin(opposite + k * 0.01) * R),
+            on: [1, 1, 1, 1, 1], pit: [0, 0, 0, 0, 0],
+        };
+        const r = buildRace(p);
+        const offRing = (q) => Math.abs(Math.hypot(q.x, q.y) - R);
+
+        // Mid-transit is the moment a chord is furthest from the track.
+        const mid = safetyCarAt(r, SC_TRANSIT_S / 2, sc, '1');
+        expect(offRing(mid)).toBeLessThan(R * 0.1);
+
+        for (const t of [0, 1, 2, 3, 4, 5, 20, 96, 98, 100]) {
+            const q = safetyCarAt(r, t, sc, '1');
+            if (q) expect(offRing(q)).toBeLessThan(R * 0.1);
+        }
     });
 
-    it('peels back into the pits at the end of the period', () => {
+    it('starts its run at the pit exit and ends back there', () => {
         const r = buildRace(payload());
         const exit = r.pitLane[r.pitLane.length - 1];
-        const atEnd = safetyCarAt(r, sc.end, sc, '1');
-        expect(atEnd.x).toBeCloseTo(exit.X, 4);
-        expect(atEnd.y).toBeCloseTo(exit.Y, 4);
+        const startD = Math.hypot(
+            safetyCarAt(r, 0, sc, '1').x - exit.X,
+            safetyCarAt(r, 0, sc, '1').y - exit.Y);
+        const endD = Math.hypot(
+            safetyCarAt(r, sc.end, sc, '1').x - exit.X,
+            safetyCarAt(r, sc.end, sc, '1').y - exit.Y);
+        const midD = Math.hypot(
+            safetyCarAt(r, 40, sc, '1').x - exit.X,
+            safetyCarAt(r, 40, sc, '1').y - exit.Y);
+        expect(startD).toBeLessThan(midD + 1e-9);
+        expect(endD).toBeLessThan(midD + 1e-9);
     });
 
     it('returns null for an unknown leader', () => {
@@ -404,10 +456,25 @@ describe('intervalsAt', () => {
         expect(Math.min(...[...g.values()].filter((v) => v != null))).toBeCloseTo(0, 6);
     });
 
-    it('reports no gap before a driver has completed a lap', () => {
-        // With 0 returned here, all twenty cars read LEADER for all of lap 1.
+    it('reports no gap at lights-out, when nobody has moved', () => {
+        // Progress is zero for everyone at t=0; returning 0 seconds there
+        // showed all twenty cars as LEADER.
         const r = buildRace(payload());
         for (const v of intervalsAt(r, 0).values()) expect(v).toBeNull();
+    });
+
+    it('produces a gap DURING lap one, not only after it', () => {
+        // The seeded start plus sector-resolution timing is what makes this
+        // possible; with lap crossings alone the column was dead until 98s.
+        const r = buildRace(payload());
+        const g = intervalsAt(r, 0.4);
+        expect([...g.values()].some((v) => v != null)).toBe(true);
+    });
+
+    it('gives no gap to a driver who never reached a timing point', () => {
+        const p = payload();
+        p.crossings['16'] = [[0, 0]];       // retired before any sector
+        expect(intervalsAt(buildRace(p), 1.0).get('16')).toBeNull();
     });
 
     it('never returns a negative interval', () => {
@@ -455,6 +522,27 @@ describe('gridSlots', () => {
         expect(g.has('1')).toBe(true);
     });
 
+    it('places a grid-position-ZERO car in the pit lane, not nowhere', () => {
+        // F1 records a pit-lane start as grid 0. Treating that as falsy
+        // dropped Ocon out of the Azerbaijan sprint grid completely.
+        const p = payload();
+        p.drivers[1].grid = 0;
+        const r = buildRace(p);
+        const g = gridSlots(r);
+        expect(g.has('16')).toBe(true);
+        expect(g.get('16').x).toBeCloseTo(r.pitLane[0].X, 4);
+        expect(g.get('16').y).toBeCloseTo(r.pitLane[0].Y, 4);
+    });
+
+    it('lines a grid-zero car up behind the field when there is no pit lane', () => {
+        const p = payload();
+        p.drivers[1].grid = 0;
+        p.pit_lane = null;
+        const g = gridSlots(buildRace(p));
+        expect(g.has('16')).toBe(true);
+        expect(Number.isFinite(g.get('16').x)).toBe(true);
+    });
+
     it('keeps the whole grid inside a small stretch of the lap', () => {
         // The unit trap: D is metres, X/Y are 0.1 m units. Sizing the row gap
         // from the X/Y extent and using it as a D distance put 10 rows across
@@ -500,5 +588,36 @@ describe('retirement', () => {
         const p = payload();
         delete p.drivers[0].out_at;
         expect(buildRace(p).cars[0].outAt).toBe(Infinity);
+    });
+});
+
+describe('standingsAt', () => {
+    it('orders by gap, so the tower can never contradict its own numbers', () => {
+        // The bug: rows came from the last completed lap while gaps came from
+        // the live clock, so a car that had passed on the road showed a
+        // smaller gap from a lower row. 718 samples of that in one race.
+        const r = buildRace(payload());
+        for (const t of [0.4, 0.9, 1.2, 1.65, 2.0]) {
+            const { order, gaps } = standingsAt(r, t);
+            const vals = order.map((n) => gaps.get(n)).filter((v) => v != null);
+            for (let i = 1; i < vals.length; i++) {
+                expect(vals[i]).toBeGreaterThanOrEqual(vals[i - 1] - 1e-9);
+            }
+        }
+    });
+
+    it('puts the car furthest along at the top', () => {
+        const r = buildRace(payload());
+        // LEC completes lap 2 first, so just after that he leads on the road
+        expect(standingsAt(r, 1.55).order[0]).toBe('16');
+        // VER completes lap 3 first
+        expect(standingsAt(r, 2.45).order[0]).toBe('1');
+    });
+
+    it('sorts cars with no timing yet to the bottom, by grid', () => {
+        const p = payload();
+        p.crossings['16'] = [[0, 0]];
+        const { order } = standingsAt(buildRace(p), 1.0);
+        expect(order[order.length - 1]).toBe('16');
     });
 });
