@@ -690,6 +690,113 @@ export const intervalsAt = (race, t) => {
     return out;
 };
 
+/**
+ * Seconds to the car AHEAD, per driver.
+ *
+ * The tower has always shown the gap to the leader, which is the wrong number
+ * for most of a race: it says Alonso is 10 s behind Verstappen when what the
+ * viewer wants to know is that he is 0.4 s behind Hamilton. Broadcast carries
+ * both and lets you switch.
+ *
+ * It falls straight out of the leader gaps. Each one is "how long ago was the
+ * leader standing where I am now", so the DIFFERENCE between two consecutive
+ * cars is how long apart those two cars are — which stays true for a car a lap
+ * down, because both numbers are measured against the same reference.
+ */
+export const aheadAt = (race, t) => {
+    const { order, gaps } = standingsAt(race, t);
+    const out = new Map();
+    let prev = null;
+    for (const num of order) {
+        const g = gaps.get(num);
+        if (g == null) { out.set(num, null); continue; }
+        out.set(num, prev == null ? null : Math.max(0, g - prev));
+        prev = g;
+    }
+    return out;
+};
+
+// --- pit stops ------------------------------------------------------------
+/**
+ * Longest a tyre change can be and still be reported as one, in seconds.
+ *
+ * Measured across four races, a real stop is 2.7-6 s stationary and the median
+ * is 3.7. Past this it is a repair, a penalty being served, or a red-flag
+ * window where the whole field is parked — Verstappen's three at Australia
+ * were stationary for 905, 847 and 1839 seconds.
+ */
+export const STOP_MAX_S = 20;
+
+/**
+ * The seconds worth printing next to a stop, or null when there are none.
+ *
+ * One rule, in one place, because two screens show it: the tower badge while
+ * a car is in the box, and the strategy chart's fastest-stop line. They must
+ * agree about what counts, or the race has two different fastest stops.
+ */
+export const namedStop = (stopped, redFlag) => (
+    !redFlag && stopped != null && stopped > 0 && stopped <= STOP_MAX_S
+        ? stopped : null
+);
+
+// --- strategy -------------------------------------------------------------
+/**
+ * Every driver's race on one row: the tyres they ran, and where they stopped.
+ *
+ * Ordered by the final classification, then by whoever lasted longest — a
+ * strategy chart that puts the retirements in the middle is unreadable.
+ *
+ * A CAR A LAP DOWN NEVER CROSSES THE LINE ON THE FINAL LAP, so reading the
+ * order off that lap alone drops it out of the classification entirely:
+ * measured at Abu Dhabi 2023, Bottas and Magnussen both finished and both came
+ * out as retirements. Their position on the last lap they DID complete is the
+ * one the FIA classifies them by, so that is the one used.
+ *
+ * Stops carry the time the car was STATIONARY, not the pit-lane transit: 2.7 s
+ * is a pit stop, the 24 s window around it is the time it cost. A red-flag
+ * window is neither, so it is flagged rather than given a number, because
+ * "905.2" against a driver's name is not a pit stop by any reading.
+ */
+const CLASSIFIED = /finish|lap/i;
+
+export const strategyRows = (race) => {
+    const seenTo = new Map();      // number -> last lap they appear on
+    const posAt = new Map();       // number -> position on that lap
+    for (const [lap, num, pos] of race.order) {
+        if (!seenTo.has(num) || lap > seenTo.get(num)) {
+            seenTo.set(num, lap);
+            posAt.set(num, pos);
+        }
+    }
+
+    const rows = race.cars.map((c) => ({
+        number: c.number,
+        code: c.code,
+        color: c.color,
+        grid: c.grid ?? null,
+        status: c.status ?? null,
+        finish: CLASSIFIED.test(c.status || '') ? (posAt.get(c.number) ?? null) : null,
+        lastLap: seenTo.get(c.number) ?? 0,
+        stints: (race.stints[c.number] || []).map((x) => ({ ...x })),
+        stops: pitsFor(race, c.number).map((p) => ({
+            lap: p.lap,
+            stopped: p.red_flag ? null : p.stopped,
+            redFlag: !!p.red_flag,
+        })),
+    }));
+
+    rows.sort((a, b) => {
+        if (a.finish != null && b.finish != null) return a.finish - b.finish;
+        if (a.finish != null) return -1;
+        if (b.finish != null) return 1;
+        // Out latest, listed first — and where two cars went out on the same
+        // lap, the one that was ahead when they did.
+        return (b.lastLap - a.lastLap)
+            || ((posAt.get(a.number) ?? 99) - (posAt.get(b.number) ?? 99));
+    });
+    return rows;
+};
+
 // --- the starting grid ----------------------------------------------------
 /** How long the grid formation takes to dissolve into the real positions. */
 export const GRID_BLEND_S = 3;

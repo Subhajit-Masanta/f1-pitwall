@@ -3,6 +3,7 @@ import {
     buildRace, frameAt, statusAt, orderByLap, lapCrossings, lapAt,
     stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
+    aheadAt, strategyRows, namedStop, STOP_MAX_S,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -19,8 +20,8 @@ const payload = () => ({
     pit_lane: [{ X: 0, Y: 50 }, { X: 100, Y: 50 }],
     pit_box: { X: 50, Y: 50, median_stop_s: 4.3 },
     drivers: [
-        { number: '1', code: 'VER', team: 'Red Bull', color: '#3671C6', grid: 1, out_at: 2 },
-        { number: '16', code: 'LEC', team: 'Ferrari', color: '#E80020', grid: 2, out_at: 2 },
+        { number: '1', code: 'VER', team: 'Red Bull', color: '#3671C6', grid: 1, out_at: 2, status: 'Finished' },
+        { number: '16', code: 'LEC', team: 'Ferrari', color: '#E80020', grid: 2, out_at: 2, status: 'Finished' },
     ],
     cars: {
         '1': { x: [0, 10, 20, 30, 40], y: [0, 0, 0, 0, 0], on: [1, 1, 1, 1, 1], pit: [0, 0, 1, 1, 0] },
@@ -812,5 +813,203 @@ describe('the racing clock (red-flag stoppages)', () => {
         const r = buildRace(payload());
         expect(r.toRacing(12.34)).toBeCloseTo(12.34, 6);
         expect(r.redSpans).toEqual([]);
+    });
+});
+
+
+describe('aheadAt', () => {
+    // Three cars, evenly strung out: the leader, one 10 s back, one 25 s back.
+    const strung = () => {
+        const p = payload();
+        p.total_laps = 4;
+        p.duration = 400;
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 400, status: 'Finished' });
+        p.cars['4'] = p.cars['16'];
+        for (const d of p.drivers) d.out_at = 400;
+        p.crossings = {
+            '1': [[0, 0], [1, 100], [2, 200], [3, 300], [4, 400]],
+            '16': [[0, 0], [1, 110], [2, 210], [3, 310], [4, 410]],
+            '4': [[0, 0], [1, 125], [2, 225], [3, 325], [4, 425]],
+        };
+        p.order = [[1, '1', 1], [1, '16', 2], [1, '4', 3]];
+        return buildRace(p);
+    };
+
+    it('reports the gap to the car in front, not to the leader', () => {
+        const r = strung();
+        const lead = intervalsAt(r, 250);
+        const ahead = aheadAt(r, 250);
+        // Third place is 25 s off the leader but only 15 s off second.
+        expect(lead.get('4')).toBeCloseTo(25, 1);
+        expect(ahead.get('4')).toBeCloseTo(15, 1);
+        expect(ahead.get('16')).toBeCloseTo(10, 1);
+    });
+
+    it('gives the leader nothing to chase', () => {
+        expect(aheadAt(strung(), 250).get('1')).toBeNull();
+    });
+
+    it('adds back up to the gap to the leader', () => {
+        // The two columns are two views of one set of numbers; if they ever
+        // disagree the tower is telling the viewer two different stories.
+        const r = strung();
+        for (const t of [150, 250, 350]) {
+            const lead = intervalsAt(r, t);
+            const ahead = aheadAt(r, t);
+            const { order } = standingsAt(r, t);
+            let sum = 0;
+            for (const num of order) {
+                const a = ahead.get(num);
+                if (a == null) continue;
+                sum += a;
+                expect(sum).toBeCloseTo(lead.get(num), 6);
+            }
+        }
+    });
+
+    it('never reports a negative interval', () => {
+        const r = strung();
+        for (let t = 5; t < 400; t += 5) {
+            for (const v of aheadAt(r, t).values()) {
+                if (v != null) expect(v).toBeGreaterThanOrEqual(0);
+            }
+        }
+    });
+
+    it('says nothing for a car with no timing yet', () => {
+        const r = strung();
+        for (const v of aheadAt(r, 0).values()) expect(v).toBeNull();
+    });
+});
+
+describe('strategyRows', () => {
+    it('lists the field in finishing order', () => {
+        const rows = strategyRows(buildRace(payload()));
+        expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC']);
+        expect(rows[0].finish).toBe(1);
+    });
+
+    it('takes the order from the classification, not from the payload', () => {
+        // The cars arrive in whatever order the payload lists them, which on
+        // a real race is the order they qualified. A strategy chart in grid
+        // order is a different chart.
+        const p = payload();
+        p.order = [
+            [1, '1', 1], [1, '16', 2],
+            [3, '16', 1], [3, '1', 2],
+        ];
+        expect(strategyRows(buildRace(p)).map((r) => r.code)).toEqual(['LEC', 'VER']);
+    });
+
+    it('classifies a car that finished a lap down', () => {
+        // A lapped car never crosses the line on the final lap, so reading the
+        // order off that lap alone dropped it out of the classification: at
+        // Abu Dhabi 2023 both Bottas and Magnussen finished and both came out
+        // as retirements.
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 2, status: 'Lapped' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);      // never seen on lap 3
+        const rows = strategyRows(buildRace(p));
+        const nor = rows.find((r) => r.code === 'NOR');
+        expect(nor.finish).toBe(3);                  // classified, not a dash
+        expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC', 'NOR']);
+    });
+
+    it('still calls a retirement a retirement', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        expect(strategyRows(buildRace(p)).find((r) => r.code === 'NOR').finish).toBeNull();
+    });
+
+    it('orders two retirements on the same lap by who was ahead', () => {
+        const p = payload();
+        for (const [num, code, pos] of [['4', 'NOR', 3], ['5', 'PIA', 4]]) {
+            p.drivers.push({ number: num, code, team: 'McLaren', color: '#FF8000', grid: 5, out_at: 1, status: 'Retired' });
+            p.cars[num] = p.cars['16'];
+            p.order.push([1, num, pos], [2, num, pos]);
+        }
+        expect(strategyRows(buildRace(p)).map((r) => r.code))
+            .toEqual(['VER', 'LEC', 'NOR', 'PIA']);
+    });
+
+    it('puts a retirement last, and the one who lasted longest first', () => {
+        const p = payload();
+        // LEC is classified on the final lap; a third car stops on lap 2.
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        const rows = strategyRows(buildRace(p));
+        expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC', 'NOR']);
+        expect(rows[2].finish).toBeNull();
+        expect(rows[2].lastLap).toBe(2);
+    });
+
+    it('carries the tyres each driver ran', () => {
+        const rows = strategyRows(buildRace(payload()));
+        expect(rows[0].stints.map((s) => s.compound)).toEqual(['MEDIUM', 'HARD']);
+        expect(rows[0].stints[0]).toMatchObject({ from: 1, to: 2, fresh: true });
+    });
+
+    it('gives a stop its stationary time, not its pit-lane window', () => {
+        // 4.1 s is a pit stop. The 25.3 s window around it is what the stop
+        // COST, which is a different number and not the one on the label.
+        const rows = strategyRows(buildRace(payload()));
+        expect(rows[0].stops).toEqual([{ lap: 2, stopped: 4.1, redFlag: false }]);
+    });
+
+    it('refuses to call a red-flag window a pit stop', () => {
+        // Australia 2023: every one of Verstappen's three stops was under a
+        // red flag, stationary for 905, 847 and 1839 seconds. Printing that
+        // next to a driver's name is not a pit stop by any reading.
+        const rows = strategyRows(buildRace(payload()));
+        const lec = rows.find((r) => r.code === 'LEC');
+        expect(lec.stops).toEqual([{ lap: 2, stopped: null, redFlag: true }]);
+    });
+
+    it('is safe for a driver with no stints and no stops', () => {
+        const p = payload();
+        delete p.stints['1'];
+        p.pits = [];
+        const rows = strategyRows(buildRace(p));
+        expect(rows.every((r) => Array.isArray(r.stints) && Array.isArray(r.stops))).toBe(true);
+    });
+
+    it('copies the stints rather than handing out the originals', () => {
+        const race = buildRace(payload());
+        strategyRows(race)[0].stints[0].compound = 'MUTATED';
+        expect(race.stints['1'][0].compound).toBe('MEDIUM');
+    });
+});
+
+
+describe('namedStop', () => {
+    // One rule, because two screens print it: the tower badge while a car is
+    // in the box, and the chart's fastest-stop line. If they disagreed, the
+    // race would have two different fastest stops.
+    it('reports a real tyre change', () => {
+        expect(namedStop(2.7, false)).toBe(2.7);
+        expect(namedStop(4.6, false)).toBe(4.6);
+    });
+
+    it('refuses a red-flag window', () => {
+        // Australia 2023: Verstappen stationary for 905, 847 and 1839 s.
+        expect(namedStop(905.2, true)).toBeNull();
+        // Even a short one, because the field was parked, not serviced.
+        expect(namedStop(3.0, true)).toBeNull();
+    });
+
+    it('refuses anything longer than a stop can be', () => {
+        expect(namedStop(STOP_MAX_S + 0.1, false)).toBeNull();
+        expect(namedStop(58.0, false)).toBeNull();
+        expect(namedStop(STOP_MAX_S, false)).toBe(STOP_MAX_S);
+    });
+
+    it('refuses a stop it has no time for', () => {
+        expect(namedStop(null, false)).toBeNull();
+        expect(namedStop(undefined, false)).toBeNull();
+        expect(namedStop(0, false)).toBeNull();
     });
 });

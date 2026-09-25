@@ -12,7 +12,7 @@
  */
 import React from 'react';
 import { F1, MONO } from '../../theme';
-import { standingsAt, stintAt } from '../../lib/race';
+import { standingsAt, aheadAt, stintAt, namedStop } from '../../lib/race';
 
 /** Tyre compound → its broadcast colour. These are the real F1 markings. */
 const COMPOUND = {
@@ -40,7 +40,21 @@ const Tyre = ({ compound }) => {
 // compute to exactly zero — an interpolated float lands on +0.000, not 0.
 const fmtGap = (g) => (g == null ? '—' : `+${g.toFixed(3)}`);
 
+/**
+ * Which gap the column is showing.
+ *
+ * LEADER is the gap to the front of the race; INTERVAL is the gap to the car
+ * immediately ahead. Broadcast carries both because they answer different
+ * questions — "who is winning" against "is there a fight here" — and a tower
+ * this narrow has room for one column at a time.
+ */
+const COLUMNS = [
+    ['leader', 'LEADER'],
+    ['ahead', 'INTERVAL'],
+];
+
 const TimingTower = ({ race, lap, second, status, narrow }) => {
+    const [column, setColumn] = React.useState('leader');
     // WHO IS IN THE PITS, BY TIME. This was keyed on the lap, and Australia
     // 2023 shows why that is wrong twice over: at lap 1 it badged five cars
     // PIT from lights-out because they pitted later in that lap, and at lap 8
@@ -81,6 +95,13 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
         () => standingsAt(race, second), [race, second],
     );
 
+    // The interval column is derived from the same standings, so the two views
+    // can never disagree about who is where.
+    const ahead = React.useMemo(
+        () => (column === 'ahead' ? aheadAt(race, second) : null),
+        [race, second, column],
+    );
+
     // Retired cars keep their classification but drop to the bottom.
     const order = React.useMemo(
         () => [...live.filter((n) => !retired.has(n)),
@@ -90,6 +111,25 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
 
     const out = retired;
 
+    // A stop is the time the car stood still — 2.7 s is a pit stop, and the
+    // 24 s pit-lane window around it is what the stop COST. Under a red flag
+    // it is neither: the field is parked, and Verstappen's three "stops" at
+    // Australia were stationary for 905, 847 and 1839 seconds.
+    const pitBadge = (p) => {
+        if (p.red_flag) return 'RED';
+        const s = namedStop(p.stopped, p.red_flag);
+        return s == null ? 'PIT' : `PIT ${s.toFixed(1)}`;
+    };
+
+    // The leader has nobody ahead, so the interval column would leave the top
+    // row blank. It says LEADER either way, which is the one thing about the
+    // top of a timing screen nobody should have to work out.
+    const cell = (num, i) => {
+        if (out.has(num)) return 'OUT';
+        if (i === 0) return 'LEADER';
+        return fmtGap(column === 'ahead' ? ahead?.get(num) : gaps.get(num));
+    };
+
     if (!order.length) return null;
 
     return (
@@ -97,6 +137,30 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
             display: 'flex', flexDirection: 'column', gap: 1,
             fontFamily: MONO, fontSize: narrow ? 10 : 11,
         }}>
+            {/* Which gap the numbers are. Unlabelled, a column of seconds is
+                ambiguous — +9.0 to the leader and +9.0 to the car ahead are
+                very different races. */}
+            <div style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: narrow ? '0 5px 3px' : '0 7px 4px',
+                fontSize: 8, fontWeight: 800, letterSpacing: 1,
+            }}>
+                <span style={{ flex: 1, color: F1.faint }}>GAP TO</span>
+                {COLUMNS.map(([id, label]) => (
+                    <button
+                        key={id}
+                        type="button"
+                        onClick={() => setColumn(id)}
+                        style={{
+                            border: 'none', cursor: 'pointer',
+                            padding: '2px 5px', fontFamily: MONO,
+                            fontSize: 8, fontWeight: 800, letterSpacing: 1,
+                            background: column === id ? F1.dim : 'transparent',
+                            color: column === id ? F1.bg : F1.faint,
+                        }}
+                    >{label}</button>
+                ))}
+            </div>
             {order.map((num, i) => {
                 const car = race.byNumber[num];
                 if (!car) return null;
@@ -123,15 +187,16 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                             <span style={{
                                 padding: '1px 4px', fontSize: 8, fontWeight: 800,
                                 letterSpacing: 0.8, background: F1.dim, color: F1.bg,
+                                fontVariantNumeric: 'tabular-nums',
                             }}>
-                                {pitting.get(num).red_flag ? 'RED' : 'PIT'}
+                                {pitBadge(pitting.get(num))}
                             </span>
                         )}
                         <span style={{
                             flex: 1, textAlign: 'right', color: i === 0 ? F1.text : F1.dim,
                             fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
                             fontSize: narrow ? 9 : 10,
-                        }}>{out.has(num) ? 'OUT' : i === 0 ? 'LEADER' : fmtGap(gaps.get(num))}</span>
+                        }}>{cell(num, i)}</span>
                     </div>
                 );
             })}

@@ -20,6 +20,7 @@ import { Play, Pause, RotateCcw } from 'lucide-react';
 
 import TrackCanvas from '../Track/TrackCanvas';
 import TimingTower from './TimingTower';
+import StrategyChart from './StrategyChart';
 import StatusBanner from './StatusBanner';
 import FlagOverlay from './FlagOverlay';
 import StageMessage from '../StageMessage';
@@ -369,7 +370,23 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         </div>
     );
 
-    if (!narrow) return stage;
+    // The strategy chart belongs to the race, not to the stage — it is the
+    // whole race at once rather than one moment of it — so it sits underneath
+    // in both layouts, reading from the payload the stage already has.
+    const strategy = (
+        <div style={{ marginTop: 10 }}>
+            <StrategyChart race={race} narrow={narrow} />
+        </div>
+    );
+
+    if (!narrow) {
+        return (
+            <>
+                {stage}
+                {strategy}
+            </>
+        );
+    }
 
     // On a narrow layout the tower cannot sit beside the map — there is no
     // column for it — but hiding it removed the running order altogether,
@@ -398,6 +415,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 <TimingTower race={race} lap={lap} second={second}
                     status={status} narrow={narrow} />
             </div>
+            {strategy}
         </>
     );
 };
