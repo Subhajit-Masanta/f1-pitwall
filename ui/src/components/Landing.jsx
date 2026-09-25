@@ -28,8 +28,8 @@ const MODES = [
         id: 'race',
         n: '03',
         title: 'Full Race',
-        blurb: 'Final classification, grid positions and points for any Grand Prix. The all-cars-on-track replay is the next thing being built.',
-        state: 'partial',
+        blurb: 'Every car on track, lap by lap — the running order and live gaps, tyre stints and pit stops, safety cars and red flags, with the full classification underneath.',
+        state: 'available',
     },
 ];
 

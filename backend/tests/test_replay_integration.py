@@ -145,7 +145,21 @@ def test_zones_lie_inside_the_lap(track):
     total = track["total_distance"]
     for key in ("drs_zones", "brake_zones"):
         for z in track[key]:
-            assert 0 <= z["start"] < z["end"] <= total + 1, f"{key} out of bounds"
+            assert 0 <= z["start"] <= total + 1, f"{key} start out of bounds"
+            assert 0 <= z["end"] <= total + 1, f"{key} end out of bounds"
+            if key == "brake_zones":
+                assert z["start"] < z["end"], "a brake zone never wraps"
+
+
+def test_at_most_one_drs_zone_crosses_the_line(track):
+    """
+    `end` before `start` is how a zone says it straddles the start/finish
+    line — one zone, reported once. There can only be one such zone on a lap,
+    and if there were none reported that way at a circuit whose main straight
+    has DRS, it would be the old double-count back again.
+    """
+    crossing = [z for z in track["drs_zones"] if z["end"] < z["start"]]
+    assert len(crossing) <= 1
 
 
 def test_sectors_are_ordered(track):

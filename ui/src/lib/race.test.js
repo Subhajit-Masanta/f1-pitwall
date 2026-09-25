@@ -621,3 +621,196 @@ describe('standingsAt', () => {
         expect(order[order.length - 1]).toBe('16');
     });
 });
+
+describe('the racing clock (red-flag stoppages)', () => {
+    // Realistic magnitudes on purpose: a red flag is minutes, and the detector
+    // ignores crossing-free stretches shorter than MIN_DEAD_S because those
+    // are racing, not a stoppage.
+    const stopped = () => {
+        const p = payload();
+        p.duration = 900;
+        p.status = [
+            { code: '1', name: 'CLEAR', start: 0, end: 100 },
+            { code: '5', name: 'RED FLAG', start: 100, end: 400 },
+            { code: '1', name: 'CLEAR', start: 400, end: 900 },
+        ];
+        // The track status clears at 400 — that is the field being released to
+        // the grid. The GREEN is at 480, and only session_status knows it.
+        p.stoppages = [[100, 480]];
+        // Cars keep crossing until 130 (finishing the lap, driving to the
+        // pits), then nothing until 520 — 40 s after the green, which is how
+        // long it takes to reach the first sector marker from a standing
+        // start. Those 40 s are racing and must survive.
+        p.crossings = {
+            '1': [[0, 0], [1, 80], [2, 130], [3, 520], [4, 600], [5, 700]],
+            '16': [[0, 0], [1, 90], [2, 140], [3, 535], [4, 620], [5, 720]],
+        };
+        return buildRace(p);
+    };
+
+    it('removes only the stretch where nothing was recorded', () => {
+        const r = stopped();
+        // dead = [140, 520] — last crossing before the stop, first after it
+        expect(r.redSpans).toHaveLength(1);
+        expect(r.redSpans[0][0]).toBeCloseTo(140, 6);
+        expect(r.redSpans[0][1]).toBeCloseTo(480, 6);
+    });
+
+    it('freezes the clock while the race is stopped', () => {
+        const r = stopped();
+        expect(r.toRacing(100)).toBeCloseTo(100, 6);
+        expect(r.toRacing(140)).toBeCloseTo(140, 6);
+        expect(r.toRacing(300)).toBeCloseTo(140, 6);   // mid-stoppage: frozen
+        expect(r.toRacing(480)).toBeCloseTo(140, 6);   // the green
+        expect(r.toRacing(520)).toBeCloseTo(180, 6);   // 40 s of racing kept
+        expect(r.toRacing(600)).toBeCloseTo(260, 6);   // resumes after
+    });
+
+    it('never collapses two real crossings onto the same instant', () => {
+        // The flag comes out before the field stops — cars finish the lap and
+        // drive to the pits, recording sectors on the way. Freezing from the
+        // flag instant mapped three of Verstappen's crossings to one racing
+        // time and blew the gaps out to +164 and +308 s.
+        const r = stopped();
+        const ts = r.crossings['1'].map(([, t]) => t);
+        expect(new Set(ts).size).toBe(ts.length);
+        for (let i = 1; i < ts.length; i++) {
+            expect(ts[i]).toBeGreaterThan(ts[i - 1]);
+        }
+    });
+
+    it('does not let the gap grow while everyone is parked', () => {
+        // The reported bug: every car read +346s and climbing under the flag.
+        const r = stopped();
+        const a = intervalsAt(r, 200).get('16');
+        const b = intervalsAt(r, 390).get('16');
+        expect(a).not.toBeNull();
+        expect(a).toBeCloseTo(b, 6);
+        expect(b).toBeLessThan(30);
+    });
+
+    it('keeps gaps sane AFTER the restart', () => {
+        // And the worse half: +437 to +496 s once running again, because the
+        // stoppage was also sitting inside the leader's own timing series.
+        const r = stopped();
+        // Sample only where both cars still have timing ahead of them: past
+        // the last recorded crossing every car's progress pins to the final
+        // lap and the "gap" is just elapsed time since it, which is a
+        // property of the fixture ending, not of the clock.
+        for (const t of [530, 600, 690]) {
+            for (const v of intervalsAt(r, t).values()) {
+                if (v != null) expect(v).toBeLessThan(30);
+            }
+        }
+    });
+
+    it('stores the timing points themselves on the racing clock', () => {
+        // Pinned directly rather than inferred from gap sizes: a gap is fairly
+        // insensitive to this (the distortion partly cancels between the two
+        // series being compared), but PROGRESS is not.
+        const r = stopped();
+        const t1 = r.crossings['1'].map(([, t]) => t);
+        expect(t1[1]).toBeCloseTo(80, 6);            // before the stop: untouched
+        expect(t1[2]).toBeCloseTo(140, 6);           // the grid, at the instant of rest
+        expect(t1[3]).toBeCloseTo(520 - 340, 6);     // 340s of dead time removed
+    });
+
+    it('puts the field back on the grid, so the restart starts level', () => {
+        // What the stoppage is FOR, from the user's side: a standing restart
+        // lines every car up on the grid, so at the green nobody is ahead of
+        // anybody. Carrying the pre-flag spread across it had the tail of the
+        // field 28 s down on a leader they were sitting beside.
+        const r = stopped();
+        for (const v of intervalsAt(r, 480).values()) {
+            if (v != null) expect(v).toBeLessThan(0.5);
+        }
+        // And it is a restart, not a freeze: the gaps open up again after it.
+        const after = [...intervalsAt(r, 600).values()].filter((v) => v != null);
+        expect(Math.max(...after)).toBeGreaterThan(1);
+    });
+
+    it('survives a second stoppage with every crossing intact', () => {
+        // Australia 2023 has three. The anchor from the first one was left on
+        // the end of the array instead of in time order, so the second read
+        // the wrong progress, judged the field forty laps down and deleted
+        // 129 of Magnussen's 154 crossings — he sat at +2414 s from lap 9 on.
+        const p = payload();
+        p.duration = 2000;
+        p.stoppages = [[100, 480], [900, 1300]];
+        // '16' is the Magnussen case: running between the two stoppages, then
+        // nothing after the second. With the anchor sitting on the end of his
+        // array instead of in time order, reading his progress ran off the end
+        // and came back with where he was at the FIRST restart.
+        p.crossings = {
+            '1': [[0, 0], [1, 80], [2, 130], [3, 520], [4, 600], [5, 700],
+                  [6, 800], [7, 880], [8, 1340], [9, 1420], [10, 1500]],
+            '16': [[0, 0], [1, 90], [2, 140], [3, 535], [4, 620], [5, 720],
+                   [6, 820], [7, 890]],
+        };
+        const r = buildRace(p);
+        for (const [num, raw] of Object.entries(p.crossings)) {
+            const kept = r.crossings[num];
+            // Every real point is still there, plus one anchor per stoppage.
+            expect(kept.length).toBeGreaterThanOrEqual(raw.length);
+            for (let i = 1; i < kept.length; i++) {
+                expect(kept[i][0]).toBeGreaterThan(kept[i - 1][0]);
+                expect(kept[i][1]).toBeGreaterThan(kept[i - 1][1]);
+            }
+            // Nobody is sent backwards. The tolerance is one grid slot: a car
+            // lining up behind the leader really is a few metres back, and
+            // that is what the restart anchor says. A lost LAP is what this is
+            // watching for.
+            const far = Math.max(...raw.map(([prog]) => prog));
+            expect(kept[kept.length - 1][0]).toBeGreaterThan(far - 0.01);
+        }
+        // And the gaps stay sane the whole way through. Each car is only
+        // checked while it still has timing ahead of it — past a car's last
+        // crossing its progress pins and the "gap" is just elapsed time
+        // since, which is what the tower shows as OUT rather than a number.
+        const lastOf = Object.fromEntries(Object.entries(r.crossings)
+            .map(([num, rows]) => [num, rows[rows.length - 1][1]]));
+        for (let t = 5; t < 1480; t += 5) {
+            const rt = r.toRacing(t);
+            for (const [num, v] of intervalsAt(r, t)) {
+                if (v != null && rt < lastOf[num]) expect(v).toBeLessThan(60);
+            }
+        }
+    });
+
+    it('takes the green from session_status, not the track status', () => {
+        // The whole point of the stoppages field. Trusting the red-flag track
+        // status would have resumed the clock at 400 and fed 80 s of standing
+        // still into every interpolation through the restart.
+        const r = stopped();
+        expect(r.redSpans[0][1]).toBeCloseTo(480, 6);
+        expect(r.toRacing(470)).toBeCloseTo(140, 6);
+    });
+
+    it('falls back to the red-flag track status without a stoppages field', () => {
+        // Payloads cached before the backend learned to emit it.
+        const p = payload();
+        p.duration = 900;
+        p.status = [{ code: '5', name: 'RED FLAG', start: 100, end: 400 }];
+        p.crossings = {
+            '1': [[0, 0], [1, 80], [2, 130], [3, 520], [4, 600]],
+            '16': [[0, 0], [1, 90], [2, 140], [3, 535], [4, 620]],
+        };
+        const r = buildRace(p);
+        expect(r.redSpans).toHaveLength(1);
+        expect(r.redSpans[0]).toEqual([140, 400]);
+    });
+
+    it('ignores a short crossing-free stretch, which is just racing', () => {
+        const p = payload();
+        p.duration = 900;
+        p.status = [{ code: '5', name: 'RED FLAG', start: 100, end: 120 }];
+        p.crossings = { '1': [[0, 0], [1, 95], [2, 125]], '16': [[0, 0], [1, 99], [2, 130]] };
+        expect(buildRace(p).redSpans).toEqual([]);
+    });
+
+    it('leaves a race with no red flag completely unchanged', () => {
+        const r = buildRace(payload());
+        expect(r.toRacing(12.34)).toBeCloseTo(12.34, 6);
+        expect(r.redSpans).toEqual([]);
+    });
+});

@@ -117,6 +117,37 @@ def _status_spans(session, t_end):
     return spans
 
 
+def _stoppages(session):
+    """
+    When the race was actually STOPPED, from the session's own status stream.
+
+    `track_status` says a red flag is out; it does not say when the race
+    resumes. Measured at Australia 2023 the red-flag status closes at 6472 s
+    but nobody records a timing point until 6883 s — the flag lifting is the
+    field being released to the grid, not the green light. Inferring the
+    restart from a hole in the timing data is no better: it puts the restart at
+    the first car's first sector, which gives that car zero seconds to have
+    driven there from a standing start and inverts the gaps for a whole lap.
+
+    `session_status` has the answer directly: Aborted marks the stop, the next
+    Started marks the green. Both in session time; the caller shifts them.
+    """
+    ss = getattr(session, "session_status", None)
+    if ss is None or getattr(ss, "empty", True):
+        return []
+    rows = [(float(t.total_seconds()), str(st))
+            for t, st in zip(ss["Time"], ss["Status"])]
+    out = []
+    open_at = None
+    for t, st in rows:
+        if st == "Aborted":
+            open_at = t
+        elif st == "Started" and open_at is not None:
+            out.append([round(open_at, 1), round(t, 1)])
+            open_at = None
+    return out
+
+
 def _merge_stints(laps):
     """
     Tyre stints per driver, with red-flag artefacts merged away.
@@ -198,16 +229,38 @@ def _pit_lane(session, lane_stops, line):
     path = pg.median_path(traces)
     if path is None:
         return None, None, None
+    # A pit lane is a road, and a road has no corners like the ones a raw
+    # median comes out with. Reversals go first — an average across one leaves
+    # a dent rather than removing it — then the path is evened out and
+    # smoothed, then resampled so the points are equally spaced again.
+    path = pg.despike(path)
+    path = pg.smooth_path(path, window=7, iters=2)
+    even = pg.resample_path(path[:, 0], path[:, 1], pg.PIT_LANE_POINTS)
+    if even is not None:
+        path = even
     # Match the raw path to the circuit FIRST, sequentially, then use those
     # endpoints as the anchors. Anchoring before matching let a global nearest
     # pick the wrong side of the circuit at Monaco.
     j = pg.sequential_nearest(path[:, 0], path[:, 1], line)
     d = np.hypot(path[:, 0] - line[j, 0], path[:, 1] - line[j, 1])
     d_ref = float(np.median(d))
-    path = pg.anchor_ends(path, line,
-                          q0=(line[j[0], 0], line[j[0], 1]),
-                          q1=(line[j[-1], 0], line[j[-1], 1]))
+    # Upstream of the entry and downstream of the exit, not the perpendicular
+    # foot of either — see approach_anchor for the fold that causes.
+    path = pg.anchor_ends(
+        path, line,
+        q0=pg.approach_anchor(line, j[0], path[0], path[1]),
+        q1=pg.approach_anchor(line[::-1], len(line) - 1 - j[-1],
+                              path[-1], path[-2]),
+    )
+    # Anchoring welds a straight ramp onto each end, which meets the body of
+    # the lane at a corner; ease those two joins off before amplifying, which
+    # would otherwise multiply them.
+    path = pg.smooth_path(path, window=5, iters=1)
     amp = pg.amplify_path(path, line, d_ref)
+    # Amplifying is per-point, so it can leave its own small kinks where the
+    # multiplier changes quickly. Index-for-index smoothing here, which is what
+    # keeps `path` and `amp` a valid pair for displace_like.
+    amp = pg.smooth_path(amp, window=7, iters=2)
     lane = [{"X": round(float(x), 1), "Y": round(float(y), 1)} for x, y in amp]
 
     box = None
@@ -328,6 +381,7 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
 
     # --- events, needed before the pit lane (red flags filter the stops) --
     spans = _status_spans(session, t_end)
+    stoppages = _stoppages(session)
     stops_all = _pair_pit_stops(laps)
     # The lane's SHAPE comes from representative stops only; everything else
     # uses every stop that happened. See _pit_detail for why these differ.
@@ -429,24 +483,27 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
         # the last time rolls out of shot rather than vanishing mid-corner.
         on = grid <= (out_at.get(num, t_end) + RETIREMENT_GRACE_S)
 
-        # Two masks, on purpose. `in_pit` is the real window and drives the
-        # PIT flag the UI shows. `shift` is that window PADDED by the same
-        # amount the lane derivation used, and it is what gets displaced.
+        # `in_pit` is the real window, and it drives the PIT flag the UI
+        # shows. What gets DISPLACED is that window padded by the same amount
+        # the lane derivation used: without the pad the transform switches on
+        # at PitInTime, by which point the car is already ~14 m off the racing
+        # line, so its drawn position stepped ~42 m sideways in one frame and
+        # the car visibly teleported into the lane. The padded window starts
+        # while the car is still on track, where the lane's own approach gives
+        # a displacement of nearly zero, so it eases in instead.
         #
-        # Without the pad the transform switches on at PitInTime, by which
-        # point the car is already ~14 m off the racing line — so its drawn
-        # position stepped ~42 m sideways in a single frame and the car
-        # visibly teleported into the pit lane. The padded window starts while
-        # the car is still on track, where the lane's own on-track approach
-        # gives a displacement of nearly zero, so it eases in instead.
+        # ONE WINDOW AT A TIME. The sequential match that keeps the
+        # displacement smooth follows a single ordered pass down the lane;
+        # handing it every stop of the race at once would ask it to jump from
+        # the exit back to the entry between laps.
         in_pit = np.zeros(len(grid), dtype=bool)
-        shift = np.zeros(len(grid), dtype=bool)
         for a, b in by_driver.get(num, []):
             in_pit |= (grid >= a) & (grid <= b)
-            shift |= (grid >= a - PIT_TRACE_PAD_S) & (grid <= b + PIT_TRACE_PAD_S)
-        if xform is not None and shift.any():
-            ax, ay = pg.displace_like(px[shift], py[shift], xform[0], xform[1])
-            px[shift], py[shift] = ax, ay
+            if xform is None:
+                continue
+            w = (grid >= a - PIT_TRACE_PAD_S) & (grid <= b + PIT_TRACE_PAD_S)
+            if w.any():
+                px[w], py[w] = pg.displace_like(px[w], py[w], xform[0], xform[1])
 
         cars[num] = {
             "x": [round(float(v), 1) for v in px],
@@ -555,6 +612,8 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
         if sh(sp["end"]) is not None and sh(sp["end"]) > 0
     ]
     lap_starts = [[lap, max(0.0, sh(t))] for lap, t in lap_starts]
+    stoppages = [[max(0.0, sh(a)), sh(b)] for a, b in stoppages
+                 if sh(b) is not None and sh(b) > 0]
     crossings = {k: [[lap, sh(t)] for lap, t in v] for k, v in crossings.items()}
     for drv in drivers:
         drv["out_at"] = sh(out_at.get(drv["number"], t_end))
@@ -587,6 +646,7 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
         "cars": cars,
         "order": order,
         "lap_starts": lap_starts,
+        "stoppages": stoppages,
         "crossings": crossings,
         "stints": _merge_stints(laps),
         "pits": pits,

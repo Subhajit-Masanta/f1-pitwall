@@ -25,6 +25,225 @@ const rot = (x, y, deg) => {
  * of the "car off the map" bug in lap mode: a loader that ran before the track
  * data had landed rotated by 0 and silently produced an unrotated lap.
  */
+/**
+ * A clock that stops when the race does.
+ *
+ * Under a red flag the wall clock keeps running while every car stands still,
+ * so any gap measured as "now minus when the leader was here" grows by one
+ * second per second. Measured at Australia 2023: every car read +346 s and
+ * climbing during the stoppage, and +437 to +496 s AFTER the restart, because
+ * the 350-second hole is also sitting inside the leader's own timing series
+ * and poisons the interpolation through it.
+ *
+ * Removing stopped time from the axis fixes both at once: the gap freezes
+ * while the race is stopped, and the series either side of the hole joins up
+ * cleanly so the numbers are sane again at the restart.
+ */
+/** A crossing-free stretch shorter than this is racing, not a stoppage. */
+const MIN_DEAD_S = 45;
+
+/**
+ * The dead interval around one stoppage: [when timing went quiet, the green].
+ *
+ * BOTH ENDS ARE MEASURED, and each from a different source, because neither
+ * source gets both right.
+ *
+ * The END is the green light, and only `session_status` knows it. The red-flag
+ * TRACK status closes when the field is released to the grid, not when the
+ * race resumes — at Australia 2023 the second span closes at 6472 s and the
+ * next timing point of any kind is 368 s later. Guessing it from the timing
+ * data instead (the first crossing after the hole) is just as wrong in the
+ * other direction: that puts the green at the moment the FIRST car reached its
+ * first sector marker, giving that car zero seconds to have driven there from
+ * a standing start — which is exactly what read as Alonso leading Verstappen
+ * by a third of a lap at the lap-58 restart.
+ *
+ * The START is not the flag instant either. Cars still have to finish the lap
+ * and drive to the pits, and those sectors are real: Verstappen records three
+ * crossings after the third red flag came out. Freezing from the flag collapsed
+ * them onto one instant.
+ *
+ * Nor is it simply the last crossing before the green, because the field drives
+ * out of the pit lane and across the line to form up on the grid — at the
+ * second Australian stoppage that put a crossing 58 s before the green and left
+ * 777 s of standing still on the clock. The field is at rest for the LONGEST
+ * crossing-free stretch inside the stoppage, so the dead interval runs from
+ * there to the green.
+ */
+const deadSpan = (a, b, times) => {
+    let from = a;
+    let prev = a;
+    let best = 0;
+    for (let i = 0; i <= times.length; i++) {
+        const raw = i < times.length ? times[i] : b;
+        if (raw <= a) continue;
+        const t = Math.min(raw, b);
+        if (t - prev > best) { best = t - prev; from = prev; }
+        prev = t;
+        if (raw >= b) break;
+    }
+    return [from, b];
+};
+
+/**
+ * Put the whole field back on the grid at every restart.
+ *
+ * A red-flag restart is a standing start: the cars line up on the grid in
+ * order, so at the green they are all at the same point on the circuit and
+ * every gap is zero. The timing data does not say that. Each driver's last
+ * point before the stoppage is wherever they happened to be when the flag
+ * flew — spread over half a minute of road — and carrying that spread across
+ * the restart is why the tower still showed the tail of the field 28 s adrift
+ * of a leader they were sitting beside on the grid.
+ *
+ * So each stoppage gets one synthetic timing point per driver: at the line, at
+ * the green. It is not invented data. It is the one moment in a race where
+ * every car's position is known exactly without measuring anything.
+ *
+ * LAPPED CARS KEEP THEIR DEFICIT. They line up at the back of the grid still a
+ * lap down, and erasing that would hand them a lap back. A driver further than
+ * LAP_DOWN_CUT of a lap behind the furthest-along car is taken to be a lap
+ * down — the cut sits well past any real on-road spread, which never comes
+ * close to a full lap.
+ */
+const LAP_DOWN_CUT = 0.84;
+
+/**
+ * One grid slot, as a fraction of a lap. F1 grid boxes are 8 m apart and the
+ * two columns are staggered, so a position is about 4 m of road; on a 5.3 km
+ * circuit that is this. It matters because a grid where every car sits at
+ * EXACTLY the same point leaves the tower with twenty identical +0.000 rows
+ * and no order at all — measured at the Australian stoppage, the running order
+ * came out scrambled for the whole twenty minutes. The spacing is real, it
+ * restores the order, and it costs about a second across the whole field.
+ */
+const GRID_STEP = 0.00075;
+
+const progAt = (rows, t) => {
+    let p = null;
+    for (const [prog, tt] of rows) { if (tt <= t) p = prog; else break; }
+    return p;
+};
+
+/** When the car reached that last point — the tie-break for two cars on it. */
+const timeAt = (rows, t) => {
+    let at = -Infinity;
+    for (const [, tt] of rows) { if (tt <= t) at = tt; else break; }
+    return at;
+};
+
+const gridAnchor = (crossings, reds, toRacing) => {
+    const rowsOf = Object.fromEntries(
+        Object.entries(crossings).map(([num, rows]) => [num, rows.slice()]),
+    );
+    for (const [a] of reds) {
+        const R = toRacing(a);
+        let P = -Infinity;
+        for (const rows of Object.values(rowsOf)) {
+            const p = progAt(rows, R);
+            if (p != null && p > P) P = p;
+        }
+        if (!Number.isFinite(P)) continue;
+
+        // The grid forms in the order the field was running when the flag
+        // flew — which is exactly what the FIA publishes as the restart order.
+        // Sectors are coarse, so most of the field shares a progress value at
+        // any instant; whoever reached it first is the one in front.
+        const onGrid = Object.entries(rowsOf)
+            .map(([num, rows]) => [num, rows, progAt(rows, R), timeAt(rows, R)])
+            // No timing at all before the stoppage means the car never started
+            // or was long gone; it has no place on the restart grid.
+            .filter(([, , p]) => p != null)
+            .sort((x, y) => (y[2] - x[2]) || (x[3] - y[3]));
+
+        let slot = 0;
+        let prevDown = null;
+        for (const [num, rows, p] of onGrid) {
+            const down = Math.max(0, Math.round((P - p) - LAP_DOWN_CUT + 0.5));
+            if (down !== prevDown) { slot = 0; prevDown = down; }
+            const at = P - down - slot * GRID_STEP;
+            slot += 1;
+            // Whatever the car had reached before it came to rest is now
+            // superseded by where it actually is: on the grid. Keeping both
+            // would run progress backwards and the anchor would be the one
+            // thrown away, which puts that car back on the pre-flag clock.
+            //
+            // BACK IN TIME ORDER afterwards. The anchor belongs in the middle
+            // of the race, not on the end of the array, and `progAt` reads
+            // rows in the order it finds them: leaving it at the back made the
+            // NEXT stoppage think every car was still on lap 8, judge them
+            // forty laps down, and delete 129 of Magnussen's 154 crossings.
+            const next = rows.filter(([prog, t]) => t > R || prog < at);
+            next.push([at, R]);
+            next.sort((m, n) => m[1] - n[1] || m[0] - n[0]);
+            rowsOf[num] = next;
+        }
+    }
+
+    // One row per instant, progress never running backwards. Two rows at one
+    // time is a zero-length interval to divide by.
+    const out = {};
+    for (const [num, rows] of Object.entries(rowsOf)) {
+        rows.sort((x, y) => x[1] - y[1] || x[0] - y[0]);
+        const keep = [];
+        for (const r of rows) {
+            const last = keep[keep.length - 1];
+            if (!last) { keep.push(r); continue; }
+            if (r[1] <= last[1]) { if (r[0] >= last[0]) keep[keep.length - 1] = r; continue; }
+            if (r[0] <= last[0]) continue;
+            keep.push(r);
+        }
+        out[num] = keep;
+    }
+    return out;
+};
+
+const makeRacingClock = (status, rawCrossings, stoppages) => {
+    // Authoritative when the payload carries it (session_status Aborted →
+    // Started); the red-flag track status is the fallback for a cached payload
+    // built before v16.
+    const spans = (stoppages?.length ? stoppages : (status || [])
+        .filter((s) => String(s.code) === '5')
+        .map((s) => [s.start, s.end]))
+        .map(([a, b]) => [a, b])
+        .sort((x, y) => x[0] - y[0]);
+    if (!spans.length) return { toRacing: (t) => t, reds: [] };
+
+    const times = [];
+    for (const rows of Object.values(rawCrossings || {})) {
+        for (const [, t] of rows) times.push(t);
+    }
+    times.sort((a, b) => a - b);
+
+    const dead = [];
+    for (const [a, b] of spans) {
+        const d = deadSpan(a, b, times);
+        if (d[1] - d[0] >= MIN_DEAD_S) dead.push(d);
+    }
+
+    // Two flags close together can produce overlapping stretches.
+    dead.sort((x, y) => x[0] - y[0]);
+    const reds = [];
+    for (const d of dead) {
+        const last = reds[reds.length - 1];
+        if (last && d[0] <= last[1]) last[1] = Math.max(last[1], d[1]);
+        else reds.push([d[0], d[1]]);
+    }
+
+    if (!reds.length) return { toRacing: (t) => t, reds: [] };
+    return {
+        reds,
+        toRacing: (t) => {
+            let stopped = 0;
+            for (const [a, b] of reds) {
+                if (t <= a) break;
+                stopped += Math.min(t, b) - a;
+            }
+            return t - stopped;
+        },
+    };
+};
+
 export const buildRace = (payload) => {
     if (!payload || !payload.cars || !payload.drivers?.length) return null;
     const deg = payload.rotation || 0;
@@ -51,6 +270,8 @@ export const buildRace = (payload) => {
             };
         });
 
+    const clock = makeRacingClock(payload.status, payload.crossings, payload.stoppages);
+
     // The outline and the pit lane are rotated the same way, so they line up.
     const track = (payload.track_points || []).map((p) => {
         const [x, y] = rot(p.X, p.Y, deg);
@@ -66,6 +287,17 @@ export const buildRace = (payload) => {
         pitBox = { X: x, Y: y, medianStop: payload.pit_box.median_stop_s };
     }
 
+    // Timing points live on the RACING clock, with the field put back on the
+    // grid at every restart.
+    const crossings = gridAnchor(
+        Object.fromEntries(
+            Object.entries(payload.crossings || {}).map(([num, rows]) => [
+                num, rows.map(([prog, t]) => [prog, clock.toRacing(t)]),
+            ]),
+        ),
+        clock.reds, clock.toRacing,
+    );
+
     return {
         race: payload.race,
         circuit: payload.circuit,
@@ -79,7 +311,11 @@ export const buildRace = (payload) => {
         pitBox,
         order: payload.order || [],
         lapStarts: payload.lap_starts || [],
-        crossings: payload.crossings || {},
+        // Timing points live on the RACING clock, so intervals never contain
+        // time the field spent parked under a red flag.
+        crossings,
+        toRacing: clock.toRacing,
+        redSpans: clock.reds,
         stints: payload.stints || {},
         pits: payload.pits || [],
         status: payload.status || [],
@@ -431,11 +667,13 @@ export const standingsAt = (race, t) => {
 };
 
 export const intervalsAt = (race, t) => {
+    // Racing time, not wall time — see makeRacingClock.
+    const rt = race.toRacing ? race.toRacing(t) : t;
     const prog = new Map();
     let leadRows = null;
     let best = -Infinity;
     for (const [num, rows] of Object.entries(race.crossings)) {
-        const p = progressOf(rows, t);
+        const p = progressOf(rows, rt);
         prog.set(num, p);
         if (p > best) { best = p; leadRows = rows; }
     }
@@ -447,7 +685,7 @@ export const intervalsAt = (race, t) => {
         const p = prog.get(num);
         if (!rows.length || !(p > 0)) { out.set(num, null); continue; }
         const tl = leadRows ? timeAtProgress(leadRows, p) : null;
-        out.set(num, tl == null ? null : Math.max(0, t - tl));
+        out.set(num, tl == null ? null : Math.max(0, rt - tl));
     }
     return out;
 };

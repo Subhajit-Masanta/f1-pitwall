@@ -21,6 +21,7 @@ import { Play, Pause, RotateCcw } from 'lucide-react';
 import TrackCanvas from '../Track/TrackCanvas';
 import TimingTower from './TimingTower';
 import StatusBanner from './StatusBanner';
+import FlagOverlay from './FlagOverlay';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
@@ -295,6 +296,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     parkAtStart={false}
                 />
             </div>
+
+            {/* The flag, across the whole stage. Sits above the map so the
+                announcement reads, below the transport so controls stay live. */}
+            <FlagOverlay span={status} />
 
             {/* transport + lap scrubber */}
             <div style={{

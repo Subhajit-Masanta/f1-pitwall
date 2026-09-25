@@ -39,9 +39,28 @@ export const buildMapLayout = (trackData, sectorBoundaries, pitLane = null) => {
     const toPath = (arr) => (arr.length > 1
         ? `M ${arr.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`
         : '');
+    // A CURVE, not a polyline. The track outline has a point every few metres
+    // so straight segments between them are invisible, but the pit lane is a
+    // 100-point average of a handful of traces — at that spacing every corner
+    // in it is a visible crease. Catmull-Rom through the points, converted to
+    // cubic Béziers, draws the same route as the road it represents.
+    const toSmoothPath = (arr) => {
+        if (arr.length < 3) return toPath(arr);
+        const at = (i) => arr[Math.max(0, Math.min(arr.length - 1, i))];
+        const n2 = (v) => v.toFixed(1);
+        let out = `M ${n2(arr[0].x)},${n2(arr[0].y)}`;
+        for (let i = 0; i < arr.length - 1; i++) {
+            const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+            const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+            const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+            out += ` C ${n2(c1x)},${n2(c1y)} ${n2(c2x)},${n2(c2y)} ${n2(p2.x)},${n2(p2.y)}`;
+        }
+        return out;
+    };
+
     const d = `${toPath(pts)} Z`;
     // Open path, not closed: a pit lane runs from entry to exit, it is not a loop.
-    const pitPath = pit.length > 1 ? toPath(pit) : '';
+    const pitPath = pit.length > 1 ? toSmoothPath(pit) : '';
 
     const idxNearest = (dist) => {
         let bi = 0, bd = Infinity;
@@ -82,9 +101,18 @@ export const buildMapLayout = (trackData, sectorBoundaries, pitLane = null) => {
     }
 
     // DRS zones as their own overlay sub-paths.
+    //
+    // A zone whose END is BEFORE its start crosses the start/finish line —
+    // the backend reports it that way rather than as two zones, because it is
+    // one. Taking the tail of the lap and then the head keeps the points in
+    // driving order; selecting both with a filter would order them by index
+    // and draw a straight line back across the circuit.
     const drsPaths = (trackData.drs_zones || [])
         .map((z) => {
-            const seg = pts.filter((p) => p.d >= z.start && p.d <= z.end);
+            const seg = z.end < z.start
+                ? [...pts.filter((p) => p.d >= z.start),
+                   ...pts.filter((p) => p.d <= z.end)]
+                : pts.filter((p) => p.d >= z.start && p.d <= z.end);
             if (seg.length < 2) return null;
             const mid = seg[Math.floor(seg.length / 2)];
             return { d: toPath(seg), mid };

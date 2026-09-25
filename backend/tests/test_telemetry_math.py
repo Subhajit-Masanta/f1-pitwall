@@ -184,6 +184,43 @@ class TestZones:
         mask[60:85] = True
         assert len(mask_to_zones(mask, self._tel(), min_length_m=50)) == 2
 
+    def test_a_zone_across_the_line_is_one_zone(self):
+        # A lap of telemetry starts and ends at the line, so the zone on the
+        # main straight is recorded as a run at each end. Counted separately,
+        # Melbourne reported five DRS zones where the circuit has four.
+        mask = np.zeros(100, bool)
+        mask[:15] = True                        # after the line
+        mask[85:] = True                        # before it
+        mask[40:60] = True                      # an ordinary zone
+        zones = mask_to_zones(mask, self._tel(), min_length_m=50, wrap=True)
+        assert len(zones) == 2
+        crossing = [z for z in zones if z["end"] < z["start"]]
+        assert len(crossing) == 1
+        assert crossing[0]["start"] == pytest.approx(850.0)
+        assert crossing[0]["end"] == pytest.approx(140.0)
+
+    def test_the_two_halves_are_measured_together(self):
+        # Neither half reaches the threshold alone; the zone does.
+        mask = np.zeros(100, bool)
+        mask[:4] = True
+        mask[96:] = True
+        assert mask_to_zones(mask, self._tel(), min_length_m=50, wrap=True)
+        assert mask_to_zones(mask, self._tel(), min_length_m=50) == []
+
+    def test_wrapping_is_opt_in(self):
+        # Brake zones live on a distance axis, where the lap does not loop.
+        mask = np.zeros(100, bool)
+        mask[:15] = True
+        mask[85:] = True
+        assert len(mask_to_zones(mask, self._tel(), min_length_m=50)) == 2
+
+    def test_a_lap_entirely_under_drs_is_not_merged_into_nothing(self):
+        mask = np.ones(100, bool)
+        zones = mask_to_zones(mask, self._tel(), min_length_m=50, wrap=True)
+        assert len(zones) == 1
+        assert zones[0]["start"] == pytest.approx(0.0)
+        assert zones[0]["end"] == pytest.approx(990.0)
+
     def test_drs_open_codes_only(self):
         """FastF1: 0/1 closed, 8 eligible-but-closed, 10/12/14 open."""
         drs = np.zeros(100)

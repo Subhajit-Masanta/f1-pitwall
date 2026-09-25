@@ -15,12 +15,28 @@ import { useState, useEffect } from 'react';
 export const STACKED_MAX = 1000;
 
 /**
+ * ...and only when the window is at least as tall as it is wide.
+ *
+ * The stacked layout spends height: it puts the map, the traces, the
+ * transport and the HUD in one column, which is exactly right on a tablet
+ * held upright and exactly wrong on a short, wide window. Measured at
+ * 916 x 561 — a 1024x768 browser window, or a laptop window that is not
+ * maximised — the stacked layout gave the map a band 869px wide and 170px
+ * tall, so the track drew at about a fifth of the stage with empty space
+ * either side of it. The desktop layout at the same size reserves its 224px
+ * timing column and still leaves the map roughly three times the area.
+ *
+ * Every width quoted above is a portrait one, so none of them move.
+ */
+export const STACKED_SHAPE = '(max-aspect-ratio: 1/1)';
+
+/**
  * True when the viewport is at or below `px` wide. Updates on resize.
  * Used to switch the replay stage between the desktop broadcast layout and a
  * stacked layout that fits a phone or a tablet held upright.
  */
 export const useIsNarrow = (px = STACKED_MAX) => {
-    const query = `(max-width: ${px}px)`;
+    const query = `(max-width: ${px}px) and ${STACKED_SHAPE}`;
     const [narrow, setNarrow] = useState(
         () => typeof window !== 'undefined' && window.matchMedia(query).matches
     );

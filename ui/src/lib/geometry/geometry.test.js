@@ -208,6 +208,32 @@ describe('buildMapLayout', () => {
         expect(layout.drsPaths).toHaveLength(1);
     });
 
+    it('draws a zone that crosses the line without cutting the circuit', () => {
+        // `end` before `start` means the zone straddles the start/finish
+        // line. Selecting those points with a plain filter orders them by
+        // index — head of the lap first, tail second — so the overlay jumped
+        // straight across the middle of the track between the two halves.
+        const t = trackData();
+        t.drs_zones = [{ start: t.total_distance * 0.9, end: t.total_distance * 0.1 }];
+        const l = buildMapLayout(t, bounds(t));
+        expect(l.drsPaths).toHaveLength(1);
+        const pts = l.drsPaths[0].d.slice(2).split(' L ')
+            .map((s) => s.split(',').map(Number));
+        expect(pts.length).toBeGreaterThan(10);
+        // No step in the overlay is longer than the circuit's own point gaps.
+        const track = l.d.slice(2).replace(' Z', '').split(' L ')
+            .map((s) => s.split(',').map(Number));
+        let worstTrack = 0;
+        for (let i = 1; i < track.length; i++) {
+            worstTrack = Math.max(worstTrack,
+                Math.hypot(track[i][0] - track[i - 1][0], track[i][1] - track[i - 1][1]));
+        }
+        for (let i = 1; i < pts.length; i++) {
+            expect(Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
+                .toBeLessThan(worstTrack * 1.5);
+        }
+    });
+
     it('colours the speed segments across the whole range', () => {
         expect(layout.speedSegments.length).toBeGreaterThan(10);
         expect(layout.speedRange.min).toBe(90);

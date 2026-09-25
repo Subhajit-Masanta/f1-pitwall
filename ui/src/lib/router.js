@@ -49,6 +49,15 @@ export const parseRoute = (pathname, search) => {
         return { mode: null, year: null, round: null, session: null, a: null, b: null };
     }
     const q = new URLSearchParams(qs);
+    const a = q.get('a') || null;
+    // `vs` was the original single-driver parameter; links already shared with
+    // it still work and simply mean "pole versus this driver".
+    let b = q.get('b') || q.get('vs') || null;
+    // Nobody races themselves. A hand-typed ?a=1&b=1 drew two cars on top of
+    // each other, labelled VER vs VER, with both pickers blank because neither
+    // list offers the driver already chosen on the other side. Dropping the
+    // second one lands on the state that already exists for "no opponent yet".
+    if (b && b === a) b = null;
     return {
         mode,
         year: num(parts[1]),
@@ -56,10 +65,8 @@ export const parseRoute = (pathname, search) => {
         // Q / R / S / SS / SQ — which session of the weekend. Older links have
         // no segment here and default to qualifying, as they always showed.
         session: (parts[3] || '').toUpperCase() || null,
-        a: q.get('a') || null,
-        // `vs` was the original single-driver parameter; links already shared
-        // with it still work and simply mean "pole versus this driver".
-        b: q.get('b') || q.get('vs') || null,
+        a,
+        b,
     };
 };
 

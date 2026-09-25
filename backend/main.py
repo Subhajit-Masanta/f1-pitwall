@@ -1,7 +1,8 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from database import check_db_connection, cache_stats
@@ -59,6 +60,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# An unhandled exception is answered by Starlette's own error response, which
+# is built OUTSIDE the CORS middleware and so carries no CORS headers. The
+# browser then refuses to let the page read it, axios reports a request with no
+# response at all, and the UI says "Can't reach the server. Check your
+# connection" — for a server that answered immediately. Measured on
+# /track/2023/99/Q, a round that does not exist.
+#
+# So every failure comes back the way the endpoints that already catch their
+# own errors do: a 200 with an `error` field the UI knows how to show.
+@app.exception_handler(Exception)
+def unhandled(request: Request, exc: Exception):
+    origin = request.headers.get("origin")
+    headers = {"Access-Control-Allow-Origin": origin,
+               "Access-Control-Allow-Credentials": "true"} if origin else {}
+    return JSONResponse({"error": str(exc) or exc.__class__.__name__},
+                        status_code=200, headers=headers)
+
 
 """
 @app.get("/users")

@@ -52,7 +52,13 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        interval column works from lights-out instead of from the end of lap 1
 #  v15 — stints merge across a red-flag restart even when FastF1 decrements
 #        TyreLife by one; weather and messages trimmed to the replay window
-CACHE_SCHEMA = "v15"
+#  v16 — authoritative red-flag stoppages (session_status Aborted/Started),
+#        so the racing clock stops at the flag and restarts at the green
+#  v17 — pit lane despiked, smoothed and evenly spaced, and cars moved
+#        onto it by an interpolated offset instead of a staircase one
+#  v18 — a DRS zone that crosses the start/finish line is one zone,
+#        not two (Melbourne read 5 where the circuit has 4)
+CACHE_SCHEMA = "v18"
 
 
 # ---------------------------------------------------------------------------

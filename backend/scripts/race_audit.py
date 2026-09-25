@@ -120,8 +120,12 @@ def audit(year, rnd, ses):
     check(all(v["out_at"] > d["duration"] * 0.9 for v in fin),
           "finishers stay on track to the end",
           f"{[v['code'] for v in fin if v['out_at'] <= d['duration']*0.9]}")
-    # Zero is a PIT LANE START, not a missing value.
-    check(all(v.get("grid") is not None and v["grid"] >= 0 for v in d["drivers"]),
+    # Zero is a PIT LANE START, not a missing value. Only sessions with a
+    # standing start have a grid at all: a sprint shootout is qualifying, and
+    # FastF1 rightly reports no grid position for it.
+    standing = str(d.get("session", "")).lower() in ("race", "sprint")
+    check(not standing or all(v.get("grid") is not None and v["grid"] >= 0
+                              for v in d["drivers"]),
           "every driver has a grid slot (0 = pit lane start)",
           f"{[v['code'] for v in d['drivers'] if v.get('grid') is None or v['grid'] < 0]}")
     grids = sorted(v["grid"] for v in d["drivers"] if v.get("grid"))
@@ -137,7 +141,10 @@ def audit(year, rnd, ses):
     if normal:
         st = [p["stopped"] for p in normal if p["stopped"] is not None]
         if st:
-            warn(max(st) < 120, "no 'normal' stop is absurdly long",
+            # Only in a race. In qualifying a "pit stop" is the car sitting in
+            # the garage between runs, and eleven minutes of that is normal.
+            warn(not standing or max(st) < 120,
+                 "no 'normal' stop is absurdly long",
                  f"max stationary {max(st)}s")
             print(f"         normal stops: {len(normal)}, stationary "
                   f"median {np.median(st):.1f}s min {min(st):.1f} max {max(st):.1f}")

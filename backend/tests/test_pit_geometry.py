@@ -18,6 +18,11 @@ from services.pit_geometry import (
     usable_stops,
     stationary_box,
     anchor_ends,
+    approach_anchor,
+    despike,
+    smooth_path,
+    project_index,
+    displace_like,
 )
 
 # A straight racing line along the x axis, y = 0.
@@ -237,3 +242,145 @@ class TestAnchorEnds:
 
     def test_degenerate_path_is_returned_unchanged(self):
         assert anchor_ends(np.array([[1.0, 1.0]]), LINE).shape == (1, 2)
+
+
+def turns(path):
+    """Turn angle in degrees at each interior point of a path."""
+    seg = np.diff(np.asarray(path, dtype=float), axis=0)
+    ang = np.degrees(np.arctan2(seg[:, 1], seg[:, 0]))
+    return np.abs((np.diff(ang) + 180.0) % 360.0 - 180.0)
+
+
+class TestAnchorEndsWithoutAHook:
+    def test_snaps_an_end_that_is_already_there(self):
+        # A ramp shorter than the point spacing is a hook, not a ramp.
+        path = np.column_stack([np.arange(10.0) + 20.0, np.full(10, 5.0)])
+        out = anchor_ends(path, LINE, q0=(20.2, 5.0), q1=(40.0, 0.0))
+        assert turns(out).max() < 60
+        assert out[0].tolist() == [20.2, 5.0]
+
+    def test_still_welds_a_real_gap(self):
+        # The distance that made the taper necessary in the first place.
+        path = np.column_stack([np.arange(10.0) + 20.0, np.full(10, 14.0)])
+        out = anchor_ends(path, LINE, q0=(20.0, 0.0), q1=(29.0, 0.0))
+        assert out[0].tolist() == [20.0, 0.0]
+        assert out[-1].tolist() == [29.0, 0.0]
+        assert len(out) > len(path)
+
+
+class TestApproachAnchor:
+    # The racing line runs +x along y = 0; the lane peels off upward.
+    def test_backs_up_past_a_foot_that_is_already_ahead(self):
+        # Bahrain: the perpendicular foot sat 2.5 m PAST the start of the lane,
+        # so welding to it ran the ramp backwards and folded the lane.
+        p0, p1 = np.array([40.0, 3.0]), np.array([44.0, 4.0])
+        j = 90                       # LINE[90] = (45, 0): ahead of p0
+        q = approach_anchor(LINE, j, p0, p1)
+        assert q[0] < LINE[j, 0]                      # it backed up
+        # and the ramp now runs the same way the lane does
+        assert float(np.dot(p0 - np.array(q), p1 - p0)) > 0
+
+    def test_keeps_a_foot_that_is_already_behind(self):
+        p0, p1 = np.array([40.0, 3.0]), np.array([44.0, 4.0])
+        j = 70                       # LINE[70] = (35, 0): behind p0
+        assert approach_anchor(LINE, j, p0, p1) == pytest.approx((35.0, 0.0))
+
+    def test_gives_up_gracefully(self):
+        # Nothing upstream qualifies; the matched point is still an answer.
+        p0, p1 = np.array([0.0, 3.0]), np.array([-4.0, 4.0])
+        q = approach_anchor(LINE, 0, p0, p1, back=0)
+        assert q == pytest.approx((0.0, 0.0))
+
+
+class TestDespike:
+    def test_removes_a_reversal(self):
+        # A straight road with one point flung backwards, which is what a
+        # point-wise median across disagreeing traces produces.
+        p = np.column_stack([np.arange(10.0), np.zeros(10)])
+        p[5] = [2.0, 4.0]
+        assert turns(p).max() > 110
+        assert turns(despike(p)).max() < 110
+
+    def test_never_drops_an_endpoint(self):
+        # The ends are what weld the lane to the circuit.
+        p = np.column_stack([np.arange(8.0), np.zeros(8)])
+        p[1] = [6.0, 3.0]
+        out = despike(p)
+        assert out[0].tolist() == p[0].tolist()
+        assert out[-1].tolist() == p[-1].tolist()
+
+    def test_leaves_a_clean_path_alone(self):
+        p = np.column_stack([np.arange(20.0), np.sin(np.arange(20.0) / 6)])
+        assert np.array_equal(despike(p), p)
+
+
+class TestSmoothPath:
+    def test_pins_both_ends_exactly(self):
+        # Anchoring has already put these on the racing line; moving them by
+        # even a metre detaches the lane from the circuit.
+        p = np.column_stack([np.arange(12.0), np.array([0, 3, -3, 2, -2, 1, -1, 2, -2, 1, 0, 0.0])])
+        out = smooth_path(p, window=5, iters=2)
+        assert out[0].tolist() == p[0].tolist()
+        assert out[-1].tolist() == p[-1].tolist()
+
+    def test_takes_the_creases_out(self):
+        p = np.column_stack([np.arange(24.0), np.tile([0.0, 2.0], 12)])
+        assert turns(smooth_path(p, window=5, iters=2)).max() < turns(p).max() / 3
+
+    def test_keeps_the_point_count(self):
+        p = np.column_stack([np.arange(30.0), np.zeros(30)])
+        assert len(smooth_path(p)) == 30
+
+    def test_a_straight_road_stays_straight(self):
+        # Points may bunch slightly near the pinned ends — what must not
+        # happen is the road bending.
+        p = np.column_stack([np.arange(15.0), np.zeros(15)])
+        out = smooth_path(p, window=7, iters=3)
+        assert out[:, 1] == pytest.approx(np.zeros(15), abs=1e-9)
+        assert np.all(np.diff(out[:, 0]) > 0)
+
+
+class TestProjectIndex:
+    PATH = np.column_stack([np.arange(11.0), np.zeros(11)])
+
+    def test_is_fractional_not_a_staircase(self):
+        u = project_index(np.array([3.25]), np.array([0.4]), self.PATH)
+        assert u[0] == pytest.approx(3.25, abs=1e-6)
+
+    def test_advances_smoothly_along_the_path(self):
+        x = np.linspace(0.0, 10.0, 101)
+        u = project_index(x, np.zeros_like(x), self.PATH)
+        assert np.all(np.diff(u) > 0)
+        assert np.diff(u).max() < 0.2
+
+    def test_clamps_to_the_ends(self):
+        u = project_index(np.array([-5.0, 99.0]), np.array([0.0, 0.0]), self.PATH)
+        assert u[0] == pytest.approx(0.0)
+        assert u[-1] == pytest.approx(10.0)
+
+
+class TestDisplaceLikeIsSmooth:
+    # A straight lane whose displacement grows along it: index 0 moves not at
+    # all, index 10 moves 10 across. Reading the offset off the nearest VERTEX
+    # gives a staircase of whole units; blending along the segment does not.
+    RAW = np.column_stack([np.arange(11.0), np.zeros(11)])
+    AMP = np.column_stack([np.arange(11.0), np.arange(11.0)])
+
+    def test_a_car_crossing_a_vertex_does_not_step_sideways(self):
+        x = np.linspace(2.0, 8.0, 121)
+        gx, gy = displace_like(x, np.zeros_like(x), self.RAW, self.AMP)
+        jump = np.hypot(np.diff(gx), np.diff(gy))
+        # Each sample is 0.05 along a path whose offset grows 1 per unit, so a
+        # continuous field moves the car about 0.07 per step. A staircase would
+        # stand still and then move a full unit at each vertex.
+        assert jump.max() < 0.15
+
+    def test_still_lands_exactly_on_the_lane(self):
+        # The whole point of reusing the lane's own displacement.
+        gx, gy = displace_like(self.RAW[:, 0], self.RAW[:, 1], self.RAW, self.AMP)
+        assert gx == pytest.approx(self.AMP[:, 0])
+        assert gy == pytest.approx(self.AMP[:, 1])
+
+    def test_an_empty_trace_is_not_an_error(self):
+        gx, gy = displace_like(np.array([]), np.array([]), self.RAW, self.AMP)
+        assert len(gx) == 0 and len(gy) == 0

@@ -139,8 +139,14 @@ def drs_zones(tel, min_length_m: float = 120.0):
 
     FastF1 DRS codes: 0/1 = closed, 8 = eligible (past detection),
     10/12/14 = open. We merge contiguous "open" samples and drop blips.
+
+    `wrap` because a lap of telemetry starts and ends at the line, and the
+    zone on the main straight usually straddles it. Counted as two, Melbourne
+    2023 reported five DRS zones where the circuit has four, and Barcelona
+    three where it has two.
     """
-    return mask_to_zones(tel["DRS"].to_numpy() >= 10, tel, min_length_m)
+    return mask_to_zones(tel["DRS"].to_numpy() >= 10, tel, min_length_m,
+                         wrap=True)
 
 
 def brake_zones(tel, min_length_m: float = 25.0):
@@ -156,11 +162,19 @@ def brake_zones(tel, min_length_m: float = 25.0):
     return mask_to_zones(brake > 0.5, tel, min_length_m)
 
 
-def mask_to_zones(mask, tel, min_length_m: float):
-    """Merge contiguous True samples into {start, end} distance ranges."""
+def mask_to_zones(mask, tel, min_length_m: float, wrap: bool = False):
+    """
+    Merge contiguous True samples into {start, end} distance ranges.
+
+    With `wrap`, a run that reaches the end of the lap and another that starts
+    at the beginning are ONE zone that happens to cross the start/finish line,
+    and it comes back with `end` BEFORE `start` to say so. The length test is
+    applied after that merge, so neither half can be discarded as a blip on its
+    own.
+    """
     dist = tel["Distance"].to_numpy().astype(float)
 
-    zones = []
+    runs = []
     i = 0
     n = len(mask)
     while i < n:
@@ -170,7 +184,20 @@ def mask_to_zones(mask, tel, min_length_m: float):
         j = i
         while j + 1 < n and mask[j + 1]:
             j += 1
-        if dist[j] - dist[i] >= min_length_m:
-            zones.append({"start": float(dist[i]), "end": float(dist[j])})
+        runs.append((i, j))
         i = j + 1
+
+    wrapped = (wrap and len(runs) >= 2
+               and runs[0][0] == 0 and runs[-1][1] == n - 1)
+    if wrapped:
+        head = runs.pop(0)
+        tail = runs.pop()
+        runs.insert(0, (tail[0], head[1]))
+
+    zones = []
+    for k, (a, b) in enumerate(runs):
+        length = ((dist[n - 1] - dist[a]) + (dist[b] - dist[0])
+                  if (wrapped and k == 0) else dist[b] - dist[a])
+        if length >= min_length_m:
+            zones.append({"start": float(dist[a]), "end": float(dist[b])})
     return zones

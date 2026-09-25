@@ -125,6 +125,66 @@ def resample_path(px, py, n):
     return np.column_stack([np.interp(g, u, px), np.interp(g, u, py)])
 
 
+def despike(path, max_turn_deg=110.0, rounds=3):
+    """
+    Drop the points where a derived path doubles back on itself.
+
+    A point-wise median across traces is not guaranteed to be monotone along
+    the route: wherever the traces disagree about where the lane goes — around
+    the boxes especially, since every team's is somewhere else — the median can
+    land behind the previous point. Measured on Australia 2023 the worst such
+    corner turned 176 degrees, a full reversal, which draws as a spike.
+
+    Smoothing alone will not remove one; an average over a reversal leaves a
+    dent. So the offending points are removed first and the resample closes the
+    gap. Endpoints are never dropped: they are what welds the lane to the
+    circuit.
+    """
+    p = np.asarray(path, dtype=float)
+    for _ in range(int(rounds)):
+        if len(p) < 4:
+            break
+        seg = np.diff(p, axis=0)
+        ang = np.degrees(np.arctan2(seg[:, 1], seg[:, 0]))
+        turn = np.abs((np.diff(ang) + 180.0) % 360.0 - 180.0)
+        bad = np.where(turn > max_turn_deg)[0] + 1        # interior indices
+        if not len(bad):
+            break
+        keep = np.ones(len(p), dtype=bool)
+        keep[bad] = False
+        keep[0] = keep[-1] = True
+        if keep.all():
+            break
+        p = p[keep]
+    return p
+
+
+def smooth_path(path, window=5, iters=2):
+    """
+    Moving average along the path, with both ends held exactly in place.
+
+    The ends are the whole reason for holding them: `anchor_ends` has put them
+    on the racing line so the lane branches off the circuit, and letting a
+    smoothing pass drift them by a few metres detaches it again.
+
+    The padding repeats the endpoints rather than reflecting, which keeps the
+    average near the ends close to where it started, so pinning them afterwards
+    does not leave a kink.
+    """
+    p = np.asarray(path, dtype=float)
+    k = int(window) // 2
+    if len(p) < 3 or k < 1:
+        return p.copy()
+    first, last = p[0].copy(), p[-1].copy()
+    ker = np.ones(2 * k + 1) / (2 * k + 1)
+    for _ in range(int(iters)):
+        pad = np.vstack([np.repeat(p[:1], k, axis=0), p, np.repeat(p[-1:], k, axis=0)])
+        p = np.column_stack([np.convolve(pad[:, 0], ker, mode="valid"),
+                             np.convolve(pad[:, 1], ker, mode="valid")])
+    p[0], p[-1] = first, last
+    return p
+
+
 def median_path(traces, n=PIT_LANE_POINTS):
     """
     One representative path from many traces of the same route.
@@ -226,18 +286,67 @@ def anchor_ends(path, line, ramp=6, q0=None, q1=None):
     if q1 is None:
         gx, gy, _ = nearest_on_line([path[-1, 0]], [path[-1, 1]], line)
         q1 = (gx[0], gy[0])
-    head = np.column_stack([
-        np.linspace(q0[0], path[0, 0], ramp + 1)[:-1],
-        np.linspace(q0[1], path[0, 1], ramp + 1)[:-1],
-    ])
-    tail = np.column_stack([
-        np.linspace(path[-1, 0], q1[0], ramp + 1)[1:],
-        np.linspace(path[-1, 1], q1[1], ramp + 1)[1:],
-    ])
-    return np.vstack([head, path, tail])
+
+    # A ramp shorter than the path's own point spacing is not a ramp, it is a
+    # hook: measured at Bahrain the entry anchor landed 0.29 m from the first
+    # captured point and slightly behind it, so the lane opened with a 176
+    # degree reversal — invisible as a polyline, a little curl once the same
+    # points are drawn as a curve. There is nothing to weld at that distance,
+    # so the end is simply moved onto the line instead.
+    body = np.array(path, dtype=float, copy=True)
+    seg = np.hypot(np.diff(body[:, 0]), np.diff(body[:, 1]))
+    eps = 0.25 * float(np.median(seg)) if len(seg) else 0.0
+
+    parts = []
+    if np.hypot(q0[0] - body[0, 0], q0[1] - body[0, 1]) > eps:
+        parts.append(np.column_stack([
+            np.linspace(q0[0], body[0, 0], ramp + 1)[:-1],
+            np.linspace(q0[1], body[0, 1], ramp + 1)[:-1],
+        ]))
+    else:
+        body[0] = q0
+    parts.append(body)
+    if np.hypot(q1[0] - body[-1, 0], q1[1] - body[-1, 1]) > eps:
+        parts.append(np.column_stack([
+            np.linspace(body[-1, 0], q1[0], ramp + 1)[1:],
+            np.linspace(body[-1, 1], q1[1], ramp + 1)[1:],
+        ]))
+    else:
+        body[-1] = q1
+    return np.vstack(parts)
 
 
-def sequential_nearest(px, py, line, window=60):
+def approach_anchor(line, j, p0, p1, back=80):
+    """
+    A point on the racing line that the pit lane can be welded to WITHOUT the
+    weld folding back on itself.
+
+    The obvious anchor is the foot of the perpendicular — the racing-line point
+    nearest where the lane begins. It is the wrong one. A pit lane peels away
+    from the circuit gradually, so its first captured point is usually a little
+    upstream of its own perpendicular foot: measured at Bahrain the foot sat
+    2.5 m PAST the start of the lane, so the ramp ran backwards into it and the
+    drawn lane opened with a 179 degree fold.
+
+    A car joins the lane from behind, so the anchor has to be behind too. This
+    walks back along the line — which is ordered around the lap — until it
+    finds a point that is genuinely upstream of the lane's own first step.
+
+    `j` is the matched index, `p0` and `p1` the first two points of the path
+    (reversed, for the exit end: pass the last two).
+    """
+    line = np.asarray(line, dtype=float)
+    p0 = np.asarray(p0, dtype=float)
+    d = np.asarray(p1, dtype=float) - p0
+    n = len(line)
+    for k in range(0, int(back) + 1):
+        q = line[(j - k) % n]
+        if float(np.dot(p0 - q, d)) > 0:
+            return (float(q[0]), float(q[1]))
+    return (float(line[j % n, 0]), float(line[j % n, 1]))
+
+
+def sequential_nearest(px, py, line, window=60, wrap=True):
     """
     Nearest index on `line` for each point of an ORDERED path, constrained to
     move only locally along the line from the previous match.
@@ -252,7 +361,11 @@ def sequential_nearest(px, py, line, window=60):
 
     Because a pit path is ordered, the matching index can only progress a
     little between consecutive samples. Searching a window around the previous
-    match enforces that, and `% n` lets the window wrap the start/finish line.
+    match enforces that.
+
+    `wrap` is what the line IS: a circuit is a loop, so the window runs through
+    the start/finish line, but a pit lane is an open route from entry to exit
+    and wrapping there would let a car at the exit match the entry.
     """
     px = np.asarray(px, dtype=float)
     py = np.asarray(py, dtype=float)
@@ -262,11 +375,48 @@ def sequential_nearest(px, py, line, window=60):
     prev = int(np.argmin(d2))
     out[0] = prev
     for k in range(1, len(px)):
-        idx = np.arange(prev - window, prev + window + 1) % n
+        if wrap:
+            idx = np.arange(prev - window, prev + window + 1) % n
+        else:
+            idx = np.arange(max(0, prev - window), min(n, prev + window + 1))
         d2 = (px[k] - line[idx, 0]) ** 2 + (py[k] - line[idx, 1]) ** 2
         prev = int(idx[int(np.argmin(d2))])
         out[k] = prev
     return out
+
+
+def project_index(px, py, path, window=40):
+    """
+    Where along `path` each point of an ORDERED trace sits, as a FRACTIONAL
+    index: 12.4 means four tenths of the way from point 12 to point 13.
+
+    The fraction is the whole point. A nearest-VERTEX answer is a staircase,
+    and anything derived from it jumps by a whole step at a time — which is
+    exactly how a car ended up moving 130 m sideways in a single frame.
+    """
+    px = np.asarray(px, dtype=float)
+    py = np.asarray(py, dtype=float)
+    path = np.asarray(path, dtype=float)
+    n = len(path)
+    if n < 2 or len(px) == 0:
+        return np.zeros(len(px))
+    j = sequential_nearest(px, py, path, window=window, wrap=False)
+    # The nearest vertex belongs to two segments; the point projects onto one
+    # of them. Try both and keep the closer.
+    best_u = np.full(len(px), np.nan)
+    best_d = np.full(len(px), np.inf)
+    for off in (-1, 0):
+        a = np.clip(j + off, 0, n - 2)
+        ax, ay = path[a, 0], path[a, 1]
+        dx, dy = path[a + 1, 0] - ax, path[a + 1, 1] - ay
+        den = dx * dx + dy * dy
+        den = np.where(den <= 0, 1e-9, den)
+        t = np.clip(((px - ax) * dx + (py - ay) * dy) / den, 0.0, 1.0)
+        d2 = (px - (ax + t * dx)) ** 2 + (py - (ay + t * dy)) ** 2
+        take = d2 < best_d
+        best_d = np.where(take, d2, best_d)
+        best_u = np.where(take, a + t, best_u)
+    return best_u
 
 
 def amplify_path(path, line, d_ref, amp=PIT_AMPLIFY, window=60):
@@ -287,9 +437,9 @@ def amplify_path(path, line, d_ref, amp=PIT_AMPLIFY, window=60):
     return np.column_stack([qx + (path[:, 0] - qx) * k, qy + (path[:, 1] - qy) * k])
 
 
-def displace_like(px, py, raw_path, amp_path):
+def displace_like(px, py, raw_path, amp_path, window=40):
     """
-    Move arbitrary points by whatever the nearest point of the lane was moved.
+    Move an ordered trace by whatever the lane itself was moved, right there.
 
     This is how CARS get onto the drawn lane. Re-deriving the transform for a
     car's own position would repeat the global-nearest problem above, and any
@@ -297,20 +447,28 @@ def displace_like(px, py, raw_path, amp_path):
     beside the lane instead of down it. Reusing the lane's own displacement
     makes that impossible: a car sitting on the real lane lands on the drawn
     lane by construction.
+
+    THE DISPLACEMENT IS INTERPOLATED, not looked up. Taking the nearest
+    vertex's offset makes the field a staircase, so a car crossing from one
+    vertex's territory to the next steps sideways by the difference between
+    them — measured at up to 130 m in a single frame, which reads as the car
+    teleporting across the pit lane. Blending between the two ends of the
+    segment the car is actually on makes the field continuous, so the car
+    moves as smoothly as its own telemetry does.
+
+    `px`/`py` must be ONE ordered pass through the lane. Two separate stops
+    concatenated would ask the sequential match to jump from the exit back to
+    the entry; call this once per pit window.
     """
     px = np.asarray(px, dtype=float)
     py = np.asarray(py, dtype=float)
-    if len(px) == 0 or raw_path is None or len(raw_path) == 0:
+    if len(px) == 0 or raw_path is None or len(raw_path) < 2:
         return px, py
-    dx = amp_path[:, 0] - raw_path[:, 0]
-    dy = amp_path[:, 1] - raw_path[:, 1]
-    ox = np.empty(len(px)); oy = np.empty(len(py))
-    CHUNK = 4096
-    for s in range(0, len(px), CHUNK):
-        e = min(s + CHUNK, len(px))
-        d2 = ((px[s:e, None] - raw_path[None, :, 0]) ** 2
-              + (py[s:e, None] - raw_path[None, :, 1]) ** 2)
-        j = np.argmin(d2, axis=1)
-        ox[s:e] = px[s:e] + dx[j]
-        oy[s:e] = py[s:e] + dy[j]
-    return ox, oy
+    raw = np.asarray(raw_path, dtype=float)
+    amp = np.asarray(amp_path, dtype=float)
+    d = amp - raw
+    u = project_index(px, py, raw, window=window)
+    i = np.clip(u.astype(int), 0, len(raw) - 2)
+    f = (u - i)[:, None]
+    delta = d[i] * (1.0 - f) + d[i + 1] * f
+    return px + delta[:, 0], py + delta[:, 1]
