@@ -27,7 +27,7 @@ const friendly = (e) => {
     return e?.message || 'Something went wrong.';
 };
 
-const RaceResults = ({ year, round, raceName }) => {
+const RaceResults = ({ year, round, session = 'R', raceName }) => {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -36,7 +36,7 @@ const RaceResults = ({ year, round, raceName }) => {
     useEffect(() => {
         let cancelled = false;
         setLoading(true); setError(null); setData(null);
-        raceService.getResults(year, round, 'R')
+        raceService.getResults(year, round, session)
             .then((d) => {
                 if (cancelled) return;
                 if (d.error || !d.standings?.length) {
@@ -48,7 +48,7 @@ const RaceResults = ({ year, round, raceName }) => {
             .catch((e) => { if (!cancelled) setError(friendly(e)); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [year, round, tick]);
+    }, [year, round, session, tick]);
 
     if (loading) {
         return <StageMessage variant="loading" title={raceName} />;

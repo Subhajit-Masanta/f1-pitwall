@@ -9,7 +9,9 @@ import RaceResults from './components/RaceResults';
 import RaceStage from './components/race/RaceStage';
 import FpsMeter from './components/FpsMeter';
 import { F1, MAXW } from './theme';
-import { useRoute, navigate, buildPath, MODE_LABEL } from './lib/router';
+import {
+  useRoute, navigate, buildPath, MODE_LABEL, RACE_SESSIONS, RACE_DEFAULT,
+} from './lib/router';
 
 const DEFAULT_YEAR = 2026;
 
@@ -23,7 +25,10 @@ function App() {
   const narrow = useIsNarrow();
 
   const { mode, round, a, b } = route;
-  const session = route.session || 'Q';
+  // Qualifying is the default for a single lap; a race replay means the grand
+  // prix unless the URL says the sprint.
+  const session = route.session
+    || (mode === 'race' ? RACE_DEFAULT : 'Q');
   const year = route.year || DEFAULT_YEAR;
 
   // Display-only: what the round in the URL is actually called. Never routes.
@@ -80,7 +85,10 @@ function App() {
             year={year}
             round={round}
             session={session}
-            showSession={mode !== 'race'}
+            showSession
+            // A sprint weekend has two races; everything else is a session of
+            // the weekend, and the picker offers what that mode can show.
+            allowSessions={mode === 'race' ? RACE_SESSIONS : null}
             onYearChange={(y) => go({ year: y, round: null, a: null, b: null })}
             onSelectRound={(r) => go({ round: r, a: null, b: null })}
             // a different session is a different set of laps and drivers
@@ -118,10 +126,17 @@ function App() {
           {round && mode === 'race' && (
             <>
               <div style={{ marginTop: 18 }}>
-                <RaceStage year={year} round={round} raceName={raceInfo?.name} />
+                <RaceStage
+                  key={`race-${year}-${round}-${session}`}
+                  year={year} round={round} session={session}
+                  raceName={raceInfo?.name}
+                />
               </div>
               <div style={{ marginTop: 18 }}>
-                <RaceResults year={year} round={round} raceName={raceInfo?.name} />
+                <RaceResults
+                  year={year} round={round} session={session}
+                  raceName={raceInfo?.name}
+                />
               </div>
             </>
           )}

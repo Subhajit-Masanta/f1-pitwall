@@ -58,7 +58,9 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        onto it by an interpolated offset instead of a staircase one
 #  v18 — a DRS zone that crosses the start/finish line is one zone,
 #        not two (Melbourne read 5 where the circuit has 4)
-CACHE_SCHEMA = "v18"
+#  v19 — drivers carry their CLASSIFIED finishing position, which the
+#        last lap's Position column does not always agree with
+CACHE_SCHEMA = "v19"
 
 
 # ---------------------------------------------------------------------------

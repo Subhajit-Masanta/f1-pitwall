@@ -4,7 +4,7 @@
  *   /                          mode picker
  *   /lap/:year/:round/:session      one driver's fastest lap
  *   /compare/:year/:round/:session  head-to-head, ?a=<driver>&b=<driver>
- *   /race/:year/:round              full race classification
+ *   /race/:year/:round[/:session]   a race or a sprint, all cars on track
  *
  * Deliberately no routing dependency. The whole surface is three fixed
  * segments plus one query parameter, and this project has already been bitten
@@ -27,6 +27,12 @@ export const SESSION_LABEL = {
     SS: 'Sprint Shootout',
     SQ: 'Sprint Qualifying',
 };
+
+/** Sessions that are a race, and so can be replayed car-by-car. */
+export const RACE_SESSIONS = ['R', 'S'];
+
+/** What `/race/:year/:round` means with no session segment. */
+export const RACE_DEFAULT = 'R';
 
 export const MODE_LABEL = {
     lap: 'Fastest Lap',
@@ -76,8 +82,12 @@ export const buildPath = ({ mode, year, round, session, a, b }) => {
     let p = `/${mode}`;
     if (year) p += `/${year}`;
     if (year && round) p += `/${round}`;
-    // the race view is one session by definition, so it carries no segment
-    if (year && round && session && mode !== 'race') p += `/${session}`;
+    // A sprint weekend has TWO races and the replay can show either, so the
+    // race view carries a session segment like the others — but only when it
+    // is not the grand prix, so that every link ever shared for a race stays
+    // exactly as it was.
+    const drop = mode === 'race' && session === RACE_DEFAULT;
+    if (year && round && session && !drop) p += `/${session}`;
     const q = new URLSearchParams();
     if (a) q.set('a', a);
     if (b) q.set('b', b);

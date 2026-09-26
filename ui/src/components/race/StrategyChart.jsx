@@ -7,25 +7,25 @@
  * how many times, not whether the man behind is on fresher rubber — which is
  * the whole of race strategy.
  *
- * So: one row per driver in finishing order, the lap axis across the top, and
- * the stints drawn as blocks in the real compound colours. A stop sits on the
- * boundary between two blocks with the time the car was stationary, because
- * that is the number a viewer can compare between teams.
+ * So: one row per driver, the lap axis across the top, and the stints drawn as
+ * blocks in the real compound colours. A stop sits on the boundary between two
+ * blocks with the time the car was stationary, because that is the number a
+ * viewer can compare between teams.
+ *
+ * IT FILLS IN AS THE RACE RUNS. Drawn complete from the first frame it is a
+ * spoiler — the winner's strategy and every retirement, visible on lap two —
+ * and that is not what a strategy screen is. The axis stays the full race so
+ * nothing jumps about; only the part that has happened is drawn, with the
+ * current lap marked.
  *
  * Pure presentation. Every fact comes from `strategyRows`, which is tested.
  */
 import React from 'react';
-import { F1, MONO } from '../../theme';
+import { F1, MONO, COMPOUND, COMPOUND_LETTER } from '../../theme';
 import { strategyRows, lapAt, namedStop } from '../../lib/race';
+import TyreMark from './TyreMark';
 
-/** The real F1 compound markings — the same map the tower uses. */
-const COMPOUND = {
-    SOFT: '#FF3B30',
-    MEDIUM: '#FFD024',
-    HARD: '#D7D7DE',
-    INTERMEDIATE: '#22C55E',
-    WET: '#3671C6',
-};
+// The compound colours live with the marking that uses them.
 
 /** Ink that stays readable on each of those. */
 const INK = {
@@ -36,9 +36,7 @@ const INK = {
     WET: '#FFFFFF',
 };
 
-const LABEL = {
-    SOFT: 'S', MEDIUM: 'M', HARD: 'H', INTERMEDIATE: 'I', WET: 'W',
-};
+const LABEL = COMPOUND_LETTER;
 
 // A red-flag change is still drawn as a tyre change, because it was one. It
 // just never gets a number: see namedStop.
@@ -120,9 +118,12 @@ const Stop = ({ stop, total, best }) => {
     );
 };
 
-const StrategyChart = ({ race, narrow }) => {
-    const rows = React.useMemo(() => strategyRows(race), [race]);
+const StrategyChart = ({ race, lap, narrow }) => {
     const total = race.totalLaps || 1;
+    const now = Math.max(1, Math.min(lap ?? total, total));
+    // Keyed on the LAP, so this rebuilds 58 times in a race rather than once a
+    // second: nothing on it changes between two laps.
+    const rows = React.useMemo(() => strategyRows(race, now), [race, now]);
     const ticks = React.useMemo(() => ticksFor(total), [total]);
 
     // WHERE THE RACE STOPPED, once. Every car changes tyres under a red flag,
@@ -130,8 +131,8 @@ const StrategyChart = ({ race, narrow }) => {
     // left a gap in the line wherever a driver was already out. It is one
     // thing that happened to the whole race, so it is drawn behind all of it.
     const redLaps = React.useMemo(
-        () => (race.redSpans || []).map(([a]) => lapAt(race, a)),
-        [race],
+        () => (race.redSpans || []).map(([a]) => lapAt(race, a)).filter((l) => l <= now),
+        [race, now],
     );
 
     // The fastest stop of the race — the one number broadcast always names.
@@ -167,7 +168,7 @@ const StrategyChart = ({ race, narrow }) => {
                 <span style={{
                     fontFamily: MONO, fontSize: 10, color: F1.faint, letterSpacing: 0.6,
                 }}>
-                    {total} LAPS
+                    LAP {now}<span style={{ opacity: 0.6 }}>/{total}</span>
                     {best && (
                         <>
                             {' · FASTEST STOP '}
@@ -186,9 +187,7 @@ const StrategyChart = ({ race, narrow }) => {
                             display: 'flex', alignItems: 'center', gap: 4,
                             fontFamily: MONO, fontSize: 9, color: F1.dim,
                         }}>
-                            <span style={{
-                                width: 8, height: 8, background: COMPOUND[c], flex: '0 0 auto',
-                            }} />
+                            <TyreMark compound={c} size={14} />
                             {narrow ? LABEL[c] : c}
                         </span>
                     ))}
@@ -215,7 +214,7 @@ const StrategyChart = ({ race, narrow }) => {
                 {rows.map((r) => (
                     <div key={r.number} style={{
                         display: 'flex', alignItems: 'center',
-                        opacity: r.finish == null ? 0.55 : 1,
+                        opacity: r.out ? 0.55 : 1,
                     }}>
                         <span style={{
                             width: nameW, flex: '0 0 auto', display: 'flex',
@@ -225,7 +224,7 @@ const StrategyChart = ({ race, narrow }) => {
                             <span style={{
                                 width: 15, textAlign: 'right', color: F1.faint,
                                 fontVariantNumeric: 'tabular-nums',
-                            }}>{r.finish ?? '—'}</span>
+                            }}>{r.pos ?? '—'}</span>
                             <span style={{
                                 width: 3, height: 11, background: r.color, flex: '0 0 auto',
                             }} />
@@ -264,6 +263,15 @@ const StrategyChart = ({ race, narrow }) => {
                             background: '#FF1E1E', opacity: 0.85,
                         }} />
                     ))}
+                    {/* where the replay has got to */}
+                    {now < total && (
+                        <div style={{
+                            position: 'absolute', top: -4, bottom: -4,
+                            left: `${(now / total) * 100}%`,
+                            width: 1, marginLeft: -0.5, background: F1.text,
+                            opacity: 0.5,
+                        }} />
+                    )}
                 </div>
             </div>
 

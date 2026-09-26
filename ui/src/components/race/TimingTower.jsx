@@ -13,28 +13,9 @@
 import React from 'react';
 import { F1, MONO } from '../../theme';
 import { standingsAt, aheadAt, stintAt, namedStop } from '../../lib/race';
+import TyreMark from './TyreMark';
 
-/** Tyre compound → its broadcast colour. These are the real F1 markings. */
-const COMPOUND = {
-    SOFT: '#FF3B30',
-    MEDIUM: '#FFD024',
-    HARD: '#EFEFEF',
-    INTERMEDIATE: '#22C55E',
-    WET: '#3671C6',
-};
-
-const Tyre = ({ compound }) => {
-    const c = COMPOUND[compound] || F1.faint;
-    return (
-        <span
-            title={compound || 'unknown'}
-            style={{
-                width: 11, height: 11, borderRadius: '50%', flex: '0 0 auto',
-                border: `2px solid ${c}`, background: 'transparent',
-            }}
-        />
-    );
-};
+const Tyre = ({ compound }) => <TyreMark compound={compound} size={11} />;
 
 // The leader is whoever sits at the top of the order, not whoever happens to
 // compute to exactly zero — an interpolated float lands on +0.000, not 0.

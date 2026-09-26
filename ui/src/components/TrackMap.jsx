@@ -10,6 +10,7 @@ import { Play, Pause, Activity } from 'lucide-react';
 import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
 import { useIsNarrow } from '../hooks/useResponsive';
+import { useKeyboard } from '../hooks/useKeyboard';
 import { stageLayout } from './stage/stageLayout';
 import { F1, MONO, SPEED_GRADIENT } from '../theme';
 import { SESSION_LABEL } from '../lib/router';
@@ -188,6 +189,17 @@ const TrackMap = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [comparing, trackData, telemetry]);
 
+    // ABOVE THE EARLY RETURNS. A hook called after one runs on some renders
+    // and not others, which is the ordering trap that has already produced two
+    // blank pages in this file.
+    //
+    // Space plays, R restarts. A single lap has nothing to step to, so the
+    // arrows are left to the page rather than swallowed for nothing.
+    useKeyboard(useMemo(() => ({
+        toggle: () => (isPlaying ? pause() : handleStart()),
+        restart,
+    }), [isPlaying, pause, handleStart, restart]), !!trackData);
+
     if (loading) {
         return <StageMessage variant="loading" title={raceName} />;
     }
@@ -198,6 +210,7 @@ const TrackMap = ({
 
     const started = hasPlayed;
     const finished = !isPlaying && sectorTimes.s3 != null;
+
     const drsCount = trackData?.drs_zones?.length || 0;
 
     const traceOpen = !!speedTrace && showTrace;

@@ -26,6 +26,7 @@ import FlagOverlay from './FlagOverlay';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
+import { useKeyboard } from '../../hooks/useKeyboard';
 import { raceService } from '../../services/raceService';
 import { buildMapLayout } from '../../lib/geometry/track';
 import {
@@ -204,6 +205,16 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         onTick(t);
     }, [race, clock, onTick]);
 
+    // Space and the arrows. A lap is the unit a race is watched in, so that is
+    // what an arrow moves — dragging a scrubber 1/58th of its width to see the
+    // next lap is not a control, it is a dare.
+    useKeyboard(useMemo(() => ({
+        toggle: () => (clock.isPlaying ? clock.pause() : clock.play()),
+        prev: () => scrubTo(Math.max(1, lap - 1)),
+        next: () => scrubTo(Math.min(race?.totalLaps ?? 1, lap + 1)),
+        restart: () => scrubTo(1),
+    }), [clock, scrubTo, lap, race]), !!race);
+
     if (loading) return <StageMessage variant="loading" title={raceName || 'Race'} />;
     if (error) {
         return <StageMessage variant="error" title={raceName || 'Race'} message={error} />;
@@ -239,7 +250,9 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     letterSpacing: 1.2, color: F1.text, background: F1.line,
                     whiteSpace: 'nowrap',
                 }}>
-                    RACE
+                    {/* A sprint weekend has two races and this replays either,
+                        so the badge says which one is on screen. */}
+                    {(race.session || 'Race').toUpperCase()}
                 </span>
                 <StatusBanner span={status} message={caption} />
 
@@ -375,7 +388,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // in both layouts, reading from the payload the stage already has.
     const strategy = (
         <div style={{ marginTop: 10 }}>
-            <StrategyChart race={race} narrow={narrow} />
+            <StrategyChart race={race} lap={lap} narrow={narrow} />
         </div>
     );
 

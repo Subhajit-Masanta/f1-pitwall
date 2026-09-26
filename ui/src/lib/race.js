@@ -301,6 +301,8 @@ export const buildRace = (payload) => {
     return {
         race: payload.race,
         circuit: payload.circuit,
+        // Which race of the weekend this is — a sprint weekend has two.
+        session: payload.session,
         totalLaps: payload.total_laps,
         hz: payload.hz,
         frames,
@@ -741,54 +743,81 @@ export const namedStop = (stopped, redFlag) => (
 
 // --- strategy -------------------------------------------------------------
 /**
- * Every driver's race on one row: the tyres they ran, and where they stopped.
+ * Every driver's race SO FAR: the tyres they have run, and where they stopped.
  *
- * Ordered by the final classification, then by whoever lasted longest — a
- * strategy chart that puts the retirements in the middle is unreadable.
+ * `throughLap` is the whole point. Drawn complete from the first frame, the
+ * chart is a spoiler — it shows the winner's three-stop and who retired while
+ * the replay is still on lap two — and it is not what a strategy screen is
+ * for. It fills in as the race runs, exactly like the one on television.
  *
- * A CAR A LAP DOWN NEVER CROSSES THE LINE ON THE FINAL LAP, so reading the
- * order off that lap alone drops it out of the classification entirely:
+ * Order is the order AT THAT LAP, not at the flag, for the same reason. Cars
+ * that are out drop to the bottom, latest first, which keeps the running order
+ * readable at the top where it is being watched.
+ *
+ * A CAR A LAP DOWN NEVER CROSSES THE LINE ON THE FINAL LAP, so its position
+ * comes from the last lap it did complete rather than from the current one:
  * measured at Abu Dhabi 2023, Bottas and Magnussen both finished and both came
- * out as retirements. Their position on the last lap they DID complete is the
- * one the FIA classifies them by, so that is the one used.
+ * out as retirements when the final lap alone was read.
+ *
+ * AND AT THE FLAG THE CLASSIFICATION WINS. Per-lap positions are the order
+ * DURING a lap, so the last one predates whatever happened on it: the same
+ * race has Perez second on lap 58, because Leclerc and Russell both passed him
+ * on it. The chart is drawn directly above the classification table and has to
+ * agree with it.
  *
  * Stops carry the time the car was STATIONARY, not the pit-lane transit: 2.7 s
  * is a pit stop, the 24 s window around it is the time it cost. A red-flag
  * window is neither, so it is flagged rather than given a number, because
  * "905.2" against a driver's name is not a pit stop by any reading.
  */
-const CLASSIFIED = /finish|lap/i;
+export const strategyRows = (race, throughLap = race.totalLaps) => {
+    const total = race.totalLaps || 1;
+    const now = Math.max(1, Math.min(throughLap, total));
+    const flag = now >= total;
 
-export const strategyRows = (race) => {
-    const seenTo = new Map();      // number -> last lap they appear on
+    const seenTo = new Map();      // number -> last lap they appear on, so far
     const posAt = new Map();       // number -> position on that lap
     for (const [lap, num, pos] of race.order) {
+        if (lap > now) continue;
         if (!seenTo.has(num) || lap > seenTo.get(num)) {
             seenTo.set(num, lap);
             posAt.set(num, pos);
         }
     }
 
-    const rows = race.cars.map((c) => ({
-        number: c.number,
-        code: c.code,
-        color: c.color,
-        grid: c.grid ?? null,
-        status: c.status ?? null,
-        finish: CLASSIFIED.test(c.status || '') ? (posAt.get(c.number) ?? null) : null,
-        lastLap: seenTo.get(c.number) ?? 0,
-        stints: (race.stints[c.number] || []).map((x) => ({ ...x })),
-        stops: pitsFor(race, c.number).map((p) => ({
-            lap: p.lap,
-            stopped: p.red_flag ? null : p.stopped,
-            redFlag: !!p.red_flag,
-        })),
-    }));
+    const rows = race.cars.map((c) => {
+        // Out is asked of the lap, not the second, because this chart is drawn
+        // in whole laps: a car that stops on lap 12 raced lap 12, and drops
+        // out of the order from 13.
+        const goneOn = Number.isFinite(c.outAt) ? lapAt(race, c.outAt) : Infinity;
+        const out = goneOn < now;
+        return {
+            number: c.number,
+            code: c.code,
+            color: c.color,
+            grid: c.grid ?? null,
+            out,
+            pos: flag && c.finish != null
+                ? c.finish
+                : (out ? null : (posAt.get(c.number) ?? null)),
+            lastLap: seenTo.get(c.number) ?? 0,
+            stints: (race.stints[c.number] || [])
+                .filter((x) => x.from <= now)
+                .map((x) => ({ ...x, to: Math.min(x.to, now) })),
+            stops: pitsFor(race, c.number)
+                .filter((p) => p.lap <= now)
+                .map((p) => ({
+                    lap: p.lap,
+                    stopped: p.red_flag ? null : p.stopped,
+                    redFlag: !!p.red_flag,
+                })),
+        };
+    });
 
     rows.sort((a, b) => {
-        if (a.finish != null && b.finish != null) return a.finish - b.finish;
-        if (a.finish != null) return -1;
-        if (b.finish != null) return 1;
+        if (a.pos != null && b.pos != null) return a.pos - b.pos;
+        if (a.pos != null) return -1;
+        if (b.pos != null) return 1;
         // Out latest, listed first — and where two cars went out on the same
         // lap, the one that was ahead when they did.
         return (b.lastLap - a.lastLap)

@@ -67,6 +67,26 @@ export const F1 = {
 /** The sector ramp in order, for anything that indexes sectors 1..3. */
 export const SECTOR = [F1.s1, F1.s2, F1.s3];
 
+/**
+ * Tyre compounds, in the real F1 markings.
+ *
+ * The one place the "saturated colour belongs to drivers" rule steps aside,
+ * for the same reason the flags do: a soft tyre that is not red is not a soft
+ * tyre. Hard is dialled back from white so a whole stint of it does not glare
+ * off the strategy chart.
+ */
+export const COMPOUND = {
+    SOFT: '#FF3B30',
+    MEDIUM: '#FFD024',
+    HARD: '#D7D7DE',
+    INTERMEDIATE: '#22C55E',
+    WET: '#3671C6',
+};
+
+export const COMPOUND_LETTER = {
+    SOFT: 'S', MEDIUM: 'M', HARD: 'H', INTERMEDIATE: 'I', WET: 'W',
+};
+
 export const MONO = "'Chivo Mono', ui-monospace, 'SF Mono', Menlo, monospace";
 
 /** shared page width so content doesn't stretch on wide monitors */

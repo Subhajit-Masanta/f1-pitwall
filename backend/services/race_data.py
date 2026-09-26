@@ -442,6 +442,18 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
             grid_pos = int(grid_pos) if grid_pos is not None and not np.isnan(grid_pos) else None
         except (TypeError, ValueError):
             grid_pos = None
+        # THE CLASSIFIED RESULT, which is not the same thing as the position
+        # on the last lap. `laps.Position` on the final lap predates whatever
+        # happened during it: measured at Abu Dhabi 2023 it has Perez second,
+        # because Leclerc and Russell both passed him on lap 58 and the lap
+        # column never caught up. The strategy chart is drawn beside the
+        # classification table, so it has to agree with it.
+        finish_pos = _res(num, "Position", None)
+        try:
+            finish_pos = (int(finish_pos) if finish_pos is not None
+                          and not np.isnan(finish_pos) else None)
+        except (TypeError, ValueError):
+            finish_pos = None
         try:
             info = session.get_driver(num)
             colour = str(info["TeamColor"] or "").strip().lstrip("#")
@@ -452,11 +464,13 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
                 "team": str(info["TeamName"]),
                 "color": f"#{colour}" if colour else "#9E9E9E",
                 "grid": grid_pos,
+                "finish": finish_pos,
                 "status": str(_res(num, "Status", "")),
             })
         except Exception:
             drivers.append({"number": str(num), "code": str(num), "name": str(num),
                             "team": "", "color": "#9E9E9E", "grid": grid_pos,
+                            "finish": finish_pos,
                             "status": str(_res(num, "Status", ""))})
 
     # --- car positions ----------------------------------------------------

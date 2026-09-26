@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { raceService } from '../services/raceService';
 import { Calendar, MapPin } from 'lucide-react';
 import { F1 } from '../theme';
@@ -13,7 +13,7 @@ import Select from './ui/Select';
  * this component ever owning that decision.
  */
 const RaceSelector = ({
-    year, round, session, showSession,
+    year, round, session, showSession, allowSessions,
     onYearChange, onSelectRound, onSelectSession, onRaceResolved,
 }) => {
     const [races, setRaces] = useState([]);
@@ -21,6 +21,16 @@ const RaceSelector = ({
     const [error, setError] = useState(null);
     const [waking, setWaking] = useState(false);
     const [sessions, setSessions] = useState([]);
+
+    // What this mode can show. A race replay can only replay a race, and on a
+    // normal weekend that leaves one option — so the picker disappears rather
+    // than offering a choice of one.
+    const shown = React.useMemo(
+        () => (allowSessions
+            ? sessions.filter((sn) => allowSessions.includes(sn.code))
+            : sessions),
+        [sessions, allowSessions],
+    );
 
     useEffect(() => {
         setLoading(true);
@@ -122,15 +132,15 @@ const RaceSelector = ({
                 maxWidth={380}
             />
 
-            {showSession && selected && (
+            {showSession && selected && shown.length > 1 && (
                 <Select
                     ariaLabel="Session"
                     value={session || 'Q'}
-                    options={sessions.length === 0
+                    options={shown.length === 0
                         ? [{ value: session || 'Q', label: 'Loading sessions…' }]
-                        : sessions.map((sn) => ({ value: sn.code, label: sn.name }))}
+                        : shown.map((sn) => ({ value: sn.code, label: sn.name }))}
                     onChange={(v) => onSelectSession?.(v)}
-                    disabled={sessions.length === 0}
+                    disabled={shown.length === 0}
                     minWidth={132}
                     maxWidth={170}
                 />

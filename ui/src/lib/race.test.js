@@ -20,8 +20,8 @@ const payload = () => ({
     pit_lane: [{ X: 0, Y: 50 }, { X: 100, Y: 50 }],
     pit_box: { X: 50, Y: 50, median_stop_s: 4.3 },
     drivers: [
-        { number: '1', code: 'VER', team: 'Red Bull', color: '#3671C6', grid: 1, out_at: 2, status: 'Finished' },
-        { number: '16', code: 'LEC', team: 'Ferrari', color: '#E80020', grid: 2, out_at: 2, status: 'Finished' },
+        { number: '1', code: 'VER', team: 'Red Bull', color: '#3671C6', grid: 1, out_at: 2, finish: 1, status: 'Finished' },
+        { number: '16', code: 'LEC', team: 'Ferrari', color: '#E80020', grid: 2, out_at: 2, finish: 2, status: 'Finished' },
     ],
     cars: {
         '1': { x: [0, 10, 20, 30, 40], y: [0, 0, 0, 0, 0], on: [1, 1, 1, 1, 1], pit: [0, 0, 1, 1, 0] },
@@ -886,7 +886,7 @@ describe('strategyRows', () => {
     it('lists the field in finishing order', () => {
         const rows = strategyRows(buildRace(payload()));
         expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC']);
-        expect(rows[0].finish).toBe(1);
+        expect(rows[0].pos).toBe(1);
     });
 
     it('takes the order from the classification, not from the payload', () => {
@@ -894,11 +894,40 @@ describe('strategyRows', () => {
         // a real race is the order they qualified. A strategy chart in grid
         // order is a different chart.
         const p = payload();
+        p.drivers[0].finish = 2;            // VER classified second
+        p.drivers[1].finish = 1;            // LEC wins
+        expect(strategyRows(buildRace(p)).map((r) => r.code)).toEqual(['LEC', 'VER']);
+    });
+
+    it('lets the classification beat the last lap at the flag', () => {
+        // Per-lap positions are the order DURING a lap, so the last one
+        // predates whatever happened on it. Abu Dhabi 2023 has Perez second on
+        // lap 58 because Leclerc and Russell both passed him on it, and the
+        // chart sits directly above the table that says he was fourth.
+        const p = payload();
         p.order = [
             [1, '1', 1], [1, '16', 2],
-            [3, '16', 1], [3, '1', 2],
+            [3, '1', 1], [3, '16', 2],      // the lap column says VER leads
         ];
-        expect(strategyRows(buildRace(p)).map((r) => r.code)).toEqual(['LEC', 'VER']);
+        p.drivers[0].finish = 2;
+        p.drivers[1].finish = 1;            // the classification says LEC won
+        const r = buildRace(p);
+        // At the flag, the stewards.
+        expect(strategyRows(r, 3).map((x) => x.code)).toEqual(['LEC', 'VER']);
+        // Before it, the race — there is no classification yet.
+        expect(strategyRows(r, 1).map((x) => x.code)).toEqual(['VER', 'LEC']);
+        expect(strategyRows(r, 2).map((x) => x.code)).toEqual(['VER', 'LEC']);
+    });
+
+    it('classifies a retirement where the stewards did', () => {
+        // The FIA ranks retirements too, and the table below shows them there.
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, finish: 3, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        const rows = strategyRows(buildRace(p));
+        expect(rows.map((x) => x.code)).toEqual(['VER', 'LEC', 'NOR']);
+        expect(rows[2]).toMatchObject({ pos: 3, out: true });
     });
 
     it('classifies a car that finished a lap down', () => {
@@ -912,8 +941,19 @@ describe('strategyRows', () => {
         p.order.push([1, '4', 3], [2, '4', 3]);      // never seen on lap 3
         const rows = strategyRows(buildRace(p));
         const nor = rows.find((r) => r.code === 'NOR');
-        expect(nor.finish).toBe(3);                  // classified, not a dash
+        expect(nor.pos).toBe(3);                     // classified, not a dash
         expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC', 'NOR']);
+    });
+
+    it('does not hand a retirement its classified place before the flag', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, finish: 3, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        expect(strategyRows(buildRace(p), 2).find((x) => x.code === 'NOR').pos)
+            .toBe(3);                        // still running on lap 2
+        const r3 = strategyRows(buildRace(p), 3).find((x) => x.code === 'NOR');
+        expect(r3.out).toBe(true);
     });
 
     it('still calls a retirement a retirement', () => {
@@ -921,7 +961,7 @@ describe('strategyRows', () => {
         p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, status: 'Retired' });
         p.cars['4'] = p.cars['16'];
         p.order.push([1, '4', 3], [2, '4', 3]);
-        expect(strategyRows(buildRace(p)).find((r) => r.code === 'NOR').finish).toBeNull();
+        expect(strategyRows(buildRace(p)).find((r) => r.code === 'NOR').pos).toBeNull();
     });
 
     it('orders two retirements on the same lap by who was ahead', () => {
@@ -943,7 +983,7 @@ describe('strategyRows', () => {
         p.order.push([1, '4', 3], [2, '4', 3]);
         const rows = strategyRows(buildRace(p));
         expect(rows.map((r) => r.code)).toEqual(['VER', 'LEC', 'NOR']);
-        expect(rows[2].finish).toBeNull();
+        expect(rows[2].pos).toBeNull();
         expect(rows[2].lastLap).toBe(2);
     });
 
@@ -967,6 +1007,61 @@ describe('strategyRows', () => {
         const rows = strategyRows(buildRace(payload()));
         const lec = rows.find((r) => r.code === 'LEC');
         expect(lec.stops).toEqual([{ lap: 2, stopped: null, redFlag: true }]);
+    });
+
+    it('stops at the lap it is asked for', () => {
+        // The whole point: drawn complete from the first frame the chart gives
+        // away the winner's strategy and every retirement on lap two.
+        const r = buildRace(payload());
+        const early = strategyRows(r, 1);
+        const ver = early.find((x) => x.code === 'VER');
+        expect(ver.stints.map((x) => x.compound)).toEqual(['MEDIUM']);
+        expect(ver.stints[0].to).toBe(1);            // clipped, not lap 2
+        expect(ver.stops).toEqual([]);               // he stops on lap 2
+    });
+
+    it('lets a stint grow as the race runs', () => {
+        const r = buildRace(payload());
+        const ver = (n) => strategyRows(r, n).find((x) => x.code === 'VER');
+        expect(ver(1).stints[0].to).toBe(1);
+        expect(ver(2).stints[0].to).toBe(2);
+        expect(ver(3).stints).toHaveLength(2);
+    });
+
+    it('shows the stops that have happened, and no others', () => {
+        const r = buildRace(payload());
+        expect(strategyRows(r, 1).find((x) => x.code === 'VER').stops).toEqual([]);
+        expect(strategyRows(r, 2).find((x) => x.code === 'VER').stops)
+            .toEqual([{ lap: 2, stopped: 4.1, redFlag: false }]);
+    });
+
+    it('orders by the running order at that lap, not by the flag', () => {
+        // Leclerc leads lap 2 and Verstappen wins. On lap 2 the chart says
+        // Leclerc.
+        const rows = strategyRows(buildRace(payload()), 2);
+        expect(rows.map((x) => x.code)).toEqual(['LEC', 'VER']);
+        expect(rows[0].pos).toBe(1);
+        // and at the flag it says Verstappen
+        expect(strategyRows(buildRace(payload())).map((x) => x.code))
+            .toEqual(['VER', 'LEC']);
+    });
+
+    it('keeps a car that retires later in the running until it does', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        const r = buildRace(p);
+        expect(strategyRows(r, 1).find((x) => x.code === 'NOR').out).toBe(false);
+        expect(strategyRows(r, 3).find((x) => x.code === 'NOR').out).toBe(true);
+    });
+
+    it('defaults to the whole race, and never runs past it', () => {
+        const r = buildRace(payload());
+        expect(strategyRows(r)).toEqual(strategyRows(r, r.totalLaps));
+        expect(strategyRows(r, 999)).toEqual(strategyRows(r, r.totalLaps));
+        expect(strategyRows(r, 0)).toEqual(strategyRows(r, 1));
+        expect(strategyRows(r, -5)).toEqual(strategyRows(r, 1));
     });
 
     it('is safe for a driver with no stints and no stops', () => {
