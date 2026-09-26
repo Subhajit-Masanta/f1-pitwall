@@ -1448,7 +1448,7 @@ describe('resultText', () => {
     });
 
     it('gives a car on the lead lap its finishing gap', () => {
-        expect(resultText(row({ gap: 12.3456 }), 1)).toBe('+12.3');
+        expect(resultText(row({ gap: 12.3456 }), 1)).toBe('+12.35');
     });
 
     it('gives a lapped car the lap count, not a time', () => {

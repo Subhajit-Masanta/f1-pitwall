@@ -71,6 +71,27 @@ describe('cameraStep', () => {
         // is the one thing the camera must never do.
         expect(cameraStep(cam, null, 1 / 60)).toBe(cam);
     });
+
+    it('CUTS straight to the target when it is not animating', () => {
+        // A paused replay produces no further frames, so a glide gets about
+        // six percent of the way and stops — picking a driver crept inwards
+        // and Escape left the map frozen half zoomed. Arriving is the point.
+        const target = { cx: 100, cy: -50, k: FOCUS_ZOOM };
+        expect(cameraStep(cam, target, 1 / 60, false)).toEqual(target);
+    });
+
+    it('still holds a null target when it is not animating', () => {
+        // Cutting is about arriving at a target, not about inventing one.
+        expect(cameraStep(cam, null, 1 / 60, false)).toBe(cam);
+    });
+
+    it('lands exactly on the wide shot when it cuts', () => {
+        // Exactly, not nearly: `isWide` is what takes the transform off the
+        // map altogether, and it was never reached from a glide that stopped
+        // at k = 1.007.
+        const wide = { cx: 0, cy: 0, k: WIDE_ZOOM };
+        expect(isWide(cameraStep(cam, wide, 1 / 60, false))).toBe(true);
+    });
 });
 
 describe('isWide', () => {
@@ -143,6 +164,19 @@ describe('camProjection', () => {
         // No window at all, so the SVG keeps the viewBox it was authored with
         // and nothing is written to it.
         expect(p.vb).toBeNull();
+    });
+
+    it('refuses to build a viewBox out of a box with no size', () => {
+        // The window a camera implies is viewW/scale, so a zero box gives a
+        // viewBox of NaNs — and an SVG handed a viewBox of NaNs draws nothing
+        // at all. A mid-resize frame should show the whole circuit, not an
+        // empty stage.
+        const cam = { cx: 100, cy: 100, k: FOCUS_ZOOM };
+        for (const [w, h, b] of [[0, H, base], [W, 0, base], [W, H, { ...base, scale: 0 }]]) {
+            const p = camProjection(b, cam, w, h);
+            expect(p.vb).toBeNull();
+            expect(Number.isFinite(p.scale)).toBe(true);
+        }
     });
 
     it('scales the map by exactly the zoom factor', () => {

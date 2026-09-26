@@ -92,13 +92,20 @@ const Row = ({ r, i }) => (
     </div>
 );
 
-const RaceEnding = ({ race, narrow, onClose, onReplay }) => {
-    const [phase, setPhase] = React.useState('flag');
+/**
+ * @param announce  throw the chequered flag first. True when the race has
+ *                  just finished; false when someone asked for the result
+ *                  from the transport, where an announcement would be
+ *                  announcing something that did not just happen.
+ */
+const RaceEnding = ({ race, narrow, announce = true, onClose, onReplay }) => {
+    const [phase, setPhase] = React.useState(announce ? 'flag' : 'sheet');
 
     React.useEffect(() => {
+        if (!announce) return undefined;
         const id = setTimeout(() => setPhase('sheet'), FLAG_MS);
         return () => clearTimeout(id);
-    }, []);
+    }, [announce]);
 
     const rows = React.useMemo(() => finalClassification(race), [race]);
     const quick = React.useMemo(

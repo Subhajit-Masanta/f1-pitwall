@@ -1125,12 +1125,10 @@ export const resultText = (row, index) => {
     if (!row.finished) return (row.status || 'DNF').toUpperCase();
     if (index === 0) return 'WINNER';
     if (row.lapsDown > 0) return `+${row.lapsDown} LAP${row.lapsDown > 1 ? 'S' : ''}`;
-    // ONE DECIMAL, not three. A result sheet prints thousandths and it is
-    // tempting to match it, but the crossings this is measured between are
-    // rounded to a tenth in the payload — checked against the official
-    // results, Hamilton's +0.179 at Australia comes out of them as +0.3.
-    // Printing +0.300 would be claiming a millisecond we do not have.
-    return row.gap == null ? '—' : `+${row.gap.toFixed(1)}`;
+    // Two decimals, for the reason set out on `fmtGap` in the timing tower:
+    // measured against the official classification at Bahrain 2023 these are
+    // accurate to about two hundredths, so the third decimal would be noise.
+    return row.gap == null ? '—' : `+${row.gap.toFixed(2)}`;
 };
 
 // --- the starting grid ----------------------------------------------------

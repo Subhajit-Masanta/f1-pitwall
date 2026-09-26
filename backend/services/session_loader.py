@@ -62,7 +62,11 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        last lap's Position column does not always agree with
 #  v20 — lap times, which a timing screen is named after and which
 #        cannot be recovered from the crossings
-CACHE_SCHEMA = "v20"
+#  v21 — crossings keep their milliseconds. Every gap on the timing screen
+#        is a difference between two of them, so rounding them to a tenth
+#        was the accuracy of the whole tower: Hamilton's finishing gap at
+#        Australia came out +0.3 against an official +0.179
+CACHE_SCHEMA = "v21"
 
 
 # ---------------------------------------------------------------------------

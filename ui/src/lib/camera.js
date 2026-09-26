@@ -74,9 +74,26 @@ export const followStep = (cur, target, dt, tau = TAU) => {
  * A null target means "hold": the car being followed is off track for this
  * frame (in the pit lane's dead zone, or retired), and the last thing a viewer
  * wants is the camera diving to the origin because the data went quiet.
+ *
+ * `animate` FALSE MEANS CUT, and it is how a paused replay behaves.
+ *
+ * A glide is a sequence of frames, and while the clock is stopped there are
+ * no frames — the map is repainted once when you pick a driver and then not
+ * again. So an animated camera on a paused replay travelled about six percent
+ * of the way and stopped: picking a driver crept slightly inwards, and
+ * pressing Escape left the map frozen half zoomed (measured: a viewBox 12420
+ * wide against 22589 at the wide shot). Driving it from its own animation
+ * loop would fix the arithmetic and keep the dependency — on a stream of
+ * frames that a stopped clock has no reason to produce.
+ *
+ * Cutting instead is both simpler and better: there is no motion on screen to
+ * be smooth with, and an instant reframe is what a broadcast director does
+ * between shots anyway. The glide is kept for when the race is actually
+ * running, which is when there is something to follow.
  */
-export const cameraStep = (cam, target, dt, tau = TAU) => {
+export const cameraStep = (cam, target, dt, animate = true, tau = TAU) => {
     if (!target) return cam;
+    if (!animate) return { cx: target.cx, cy: target.cy, k: target.k };
     return {
         cx: followStep(cam.cx, target.cx, dt, tau),
         cy: followStep(cam.cy, target.cy, dt, tau),
@@ -110,7 +127,12 @@ export const cameraStep = (cam, target, dt, tau = TAU) => {
  * @param cam   { cx, cy, k } in track units, or null for no camera
  */
 export const camProjection = (base, cam, viewW, viewH) => {
-    if (!cam) {
+    // No camera, or nothing to point it at. A box with no size is the one
+    // that matters: the window it implies is viewW/scale, so a zero there
+    // makes a viewBox of NaNs and an SVG given a viewBox of NaNs draws
+    // NOTHING. Falling back to the authored one means the worst a
+    // mid-resize frame can do is show the whole circuit.
+    if (!cam || !(viewW > 0) || !(viewH > 0) || !(base.scale > 0)) {
         return { scale: base.scale, offX: base.offX, offY: base.offY, k: 1, vb: null };
     }
     const { cx, cy, k } = cam;

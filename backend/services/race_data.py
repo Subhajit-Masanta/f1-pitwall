@@ -153,10 +153,11 @@ def _lap_times(laps):
     Every driver's lap times, in seconds.
 
     The one number a timing screen is named after, and the payload has never
-    carried it. It cannot be recovered from the crossings either: those are
-    rounded to a tenth and sit on the racing clock, so a derived lap time is
-    out by up to 0.2 s and any lap spanning a stoppage comes out as nonsense —
-    measured at Australia 2023, seven of fifty-six laps.
+    carried it. It cannot be recovered from the crossings either: those sit on
+    the RACING clock, so any lap spanning a stoppage comes out as nonsense —
+    measured at Australia 2023, seven of fifty-six laps. (They used also to be
+    rounded to a tenth; v21 keeps their milliseconds, but the racing-clock
+    problem is the one that makes a derived lap time unusable.)
 
     NaT laps are left out rather than sent as null: a lap with no time is a lap
     that was not completed, and 901 of 1003 rows have one.
@@ -650,6 +651,21 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
     def sh(v):
         return None if v is None else round(v - t0, 1)
 
+    # CROSSINGS KEEP THEIR MILLISECONDS. Everything else on this clock is a
+    # boundary — when a lap began, when a flag flew — and a tenth is plenty
+    # for those. Crossings are different: every gap and every interval on the
+    # timing screen is a DIFFERENCE between two of them, so their rounding is
+    # the accuracy of the whole tower. At a tenth, two cars a tenth apart can
+    # read anywhere from 0.0 to 0.2, and the finishing gap for Hamilton at
+    # Australia 2023 came out as +0.3 against an official +0.179 — a screen
+    # printing three decimals it did not have.
+    #
+    # FastF1's sector session times carry milliseconds, so this is simply
+    # stopping throwing them away. Cost: two more characters on each of ~2900
+    # numbers, which is under 2 KB gzipped against a 1.2 MB payload.
+    def sh3(v):
+        return None if v is None else round(v - t0, 3)
+
     spans = [
         {**sp, "start": max(0.0, sh(sp["start"])), "end": sh(sp["end"])}
         for sp in spans
@@ -658,7 +674,7 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
     lap_starts = [[lap, max(0.0, sh(t))] for lap, t in lap_starts]
     stoppages = [[max(0.0, sh(a)), sh(b)] for a, b in stoppages
                  if sh(b) is not None and sh(b) > 0]
-    crossings = {k: [[lap, sh(t)] for lap, t in v] for k, v in crossings.items()}
+    crossings = {k: [[lap, sh3(t)] for lap, t in v] for k, v in crossings.items()}
     for drv in drivers:
         drv["out_at"] = sh(out_at.get(drv["number"], t_end))
     # Both streams run past the chequered flag — the SESSION continues after

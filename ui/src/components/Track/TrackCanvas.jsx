@@ -17,6 +17,24 @@ import { F1, MONO, speedColor } from '../../theme';
 import { camProjection } from '../../lib/camera';
 import CarLayer from './CarLayer';
 
+/**
+ * Tick thickness, in SCREEN pixels rather than track units.
+ *
+ * The road is meant to get thicker as the camera zooms in — that is what
+ * being closer to it looks like. A sector tick is not road: it is a marker
+ * drawn across one, and at 3.2x the start/finish line grew from a 13px line
+ * into a 41px white block sitting on the circuit. `non-scaling-stroke` keeps
+ * the thickness fixed while the LENGTH still scales, so the line goes on
+ * spanning the road and stops turning into a slab.
+ *
+ * The values are what the old track-unit widths already rendered at on a
+ * typical stage (measured: 12.9px and 8.0px at Melbourne), so the wide shot —
+ * and every circuit in lap and compare mode, which have no camera at all —
+ * looks as it did.
+ */
+const START_TICK_PX = 12;
+const SECTOR_TICK_PX = 7;
+
 const TrackCanvas = memo(forwardRef(({
     mapLayout, view = 'map', cars = [], pitBox = null, parkAtStart = true,
     dominance = null,
@@ -157,7 +175,8 @@ const TrackCanvas = memo(forwardRef(({
     const Tick = ({ t, color, text, wide = false }) => !t ? null : (
         <g>
             <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
-                stroke={color} strokeWidth={lw * (wide ? 2.4 : 1.5)} strokeLinecap="round" />
+                stroke={color} strokeWidth={wide ? START_TICK_PX : SECTOR_TICK_PX}
+                vectorEffect="non-scaling-stroke" strokeLinecap="round" />
             {text && (
                 <text x={t.lx} y={t.ly} fill={color} fontSize={label * 0.9}
                     fontFamily={MONO} fontWeight="700" letterSpacing={label * 0.05}

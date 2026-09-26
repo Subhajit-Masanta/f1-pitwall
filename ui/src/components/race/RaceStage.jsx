@@ -71,8 +71,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // What the director is currently watching and why. Set only when it cuts,
     // not once a second — a new object every second is a render every second.
     const [shotOn, setShotOn] = useState(null);
-    // The race is over and the result is on screen.
-    const [ended, setEnded] = useState(false);
+    // The result on screen, and how it got there: 'flag' when the race just
+    // finished and the chequered flag is worth throwing, 'sheet' when someone
+    // asked for it mid-race and an announcement would be theatre.
+    const [ended, setEnded] = useState(null);
 
     const trackRef = useRef(null);
     const clockLabelRef = useRef(null);
@@ -83,6 +85,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // onTick's dependencies would rebuild the tick callback on every click.
     const focusRef = useRef(null);
     const directorRef = useRef(false);
+    const playingRef = useRef(false);
     focusRef.current = focus;
     directorRef.current = director;
 
@@ -211,7 +214,11 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 target = p && p.on ? { cx: p.x, cy: -p.y, k: FOCUS_ZOOM } : null;
             }
 
-            cam.current = cameraStep(cam.current || { ...home, k: WIDE_ZOOM }, target, dt);
+            // Cut rather than glide while the clock is stopped — a paused
+            // replay produces no further frames to glide on. See cameraStep.
+            cam.current = cameraStep(
+                cam.current || { ...home, k: WIDE_ZOOM }, target, dt, playingRef.current,
+            );
             // Once the pull-back has finished, stop transforming the map at
             // all — a track drawn through a scale of 1.0001 is still being
             // composited and still rounding every sub-pixel.
@@ -289,7 +296,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         speed,
         onTick,
         // The race now ENDS rather than simply stopping.
-        onEnd: () => setEnded(true),
+        onEnd: () => setEnded('flag'),
     });
 
     // Park every car at the start before the first play, and re-park whenever
@@ -300,7 +307,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         clock.reset();
         statusCursor.current = 0;
         setLap(1);
-        setEnded(false);
+        setEnded(null);
         // A new race is a new camera. Carrying the last one over points a
         // 3.2x zoom at a coordinate on a circuit that is no longer loaded.
         cam.current = null;
@@ -327,15 +334,23 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // clicks a driver to look at them.
     useEffect(() => {
         if (race) onTick(clock.timeRef.current);
+        // `clock.isPlaying` is here so that PAUSING settles the camera. Pause
+        // in the middle of a zoom and the frames stop arriving mid-glide,
+        // which left it parked between the two shots; one more tick with the
+        // clock stopped cuts it the rest of the way.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [narrow, race, onTick, focus, director]);
+    }, [narrow, race, onTick, focus, director, clock.isPlaying]);
+
+    // The hot path asks whether the replay is running, to decide whether the
+    // camera glides or cuts.
+    playingRef.current = clock.isPlaying;
 
     /** Jump to a lap. This is the primary way to move through a race. */
     const scrubTo = useCallback((targetLap) => {
         if (!race) return;
         const row = race.lapStarts.find(([l]) => l === targetLap);
         const t = row ? row[1] : 0;
-        setEnded(false);
+        setEnded(null);
         clock.seek(t);
         onTick(t);
     }, [race, clock, onTick]);
@@ -370,10 +385,14 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         next: () => scrubTo(Math.min(race?.totalLaps ?? 1, lap + 1)),
         restart: () => scrubTo(1),
         director: toggleDirector,
-        // One key that always gets you back to the whole circuit, whichever
-        // of the two things is holding the camera.
-        escape: () => { setFocus(null); setDirector(false); setShotOn(null); },
-    }), [clock, scrubTo, lap, race, toggleDirector]), !!race);
+        // The way out of whatever is on top: the result sheet first, since it
+        // covers the stage, and otherwise the camera — whichever of the two
+        // things is holding it.
+        escape: () => {
+            if (ended) { setEnded(null); return; }
+            setFocus(null); setDirector(false); setShotOn(null);
+        },
+    }), [clock, scrubTo, lap, race, toggleDirector, ended]), !!race);
 
     if (loading) return <StageMessage variant="loading" title={raceName || 'Race'} />;
     if (error) {
@@ -586,8 +605,8 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 frame of the race. */}
             {ended && (
                 <RaceEnding
-                    race={race} narrow={narrow}
-                    onClose={() => setEnded(false)}
+                    race={race} narrow={narrow} announce={ended === 'flag'}
+                    onClose={() => setEnded(null)}
                     onReplay={() => { scrubTo(1); clock.play(); }}
                 />
             )}
@@ -634,6 +653,21 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     >
                         <RotateCcw size={14} />
                     </button>
+                    {/* THE RESULT, ON DEMAND. It used to exist for exactly as
+                        long as it was on screen: close it and the only way
+                        back was to watch the race again. It spoils the race,
+                        which is why it is a labelled button and not something
+                        that happens to you. */}
+                    <button
+                        onClick={() => setEnded('sheet')}
+                        title="Final classification — this gives away the result"
+                        style={{
+                            height: 34, padding: '0 12px', background: 'transparent',
+                            color: F1.dim, border: `1px solid ${F1.line}`, cursor: 'pointer',
+                            fontFamily: MONO, fontSize: 10, fontWeight: 700,
+                            letterSpacing: 1.2,
+                        }}
+                    >RESULT</button>
                     <span ref={weatherRef} style={{
                         fontFamily: MONO, fontSize: 10, letterSpacing: 0.4, color: F1.faint,
                     }} />

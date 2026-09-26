@@ -21,8 +21,19 @@ import TyreMark from './TyreMark';
 const Tyre = ({ compound }) => <TyreMark compound={compound} size={11} />;
 
 // The leader is whoever sits at the top of the order, not whoever happens to
-// compute to exactly zero — an interpolated float lands on +0.000, not 0.
-const fmtGap = (g) => (g == null ? '—' : `+${g.toFixed(3)}`);
+// compute to exactly zero — an interpolated float lands on +0.00, not 0.
+//
+// TWO DECIMALS, AND THAT IS A MEASUREMENT RATHER THAN A STYLE CHOICE.
+// Broadcast prints three and it is tempting to match, but every gap here is a
+// difference between two sector crossings, so the question is how accurate
+// those are. Checked against the official classification at Bahrain 2023 (a
+// green finish, so the cleanest test available): mean error 0.021 s, worst
+// 0.050 s, with Alonso two thousandths out. Hundredths are real; the third
+// decimal would be noise dressed up as timing.
+//
+// Lap times are not affected — those come from FastF1's own LapTime and are
+// genuinely millisecond-accurate, so LAST and BEST keep all three.
+const fmtGap = (g) => (g == null ? '—' : `+${g.toFixed(2)}`);
 
 /**
  * Which gap the column is showing.
@@ -52,7 +63,7 @@ const COLUMNS = [
 const REL = ['rel', 'REL'];
 
 /** A signed second, padded so + and - land in the same column. */
-const fmtRel = (d) => (d == null ? '—' : `${d < 0 ? '-' : '+'}${Math.abs(d).toFixed(3)}`);
+const fmtRel = (d) => (d == null ? '—' : `${d < 0 ? '-' : '+'}${Math.abs(d).toFixed(2)}`);
 
 /** m:ss.mmm — a lap time, the way a timing screen writes one. */
 const fmtLap = (t) => {
