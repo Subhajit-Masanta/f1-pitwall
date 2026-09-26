@@ -5,7 +5,7 @@ import {
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
     aheadAt, strategyRows, namedStop, STOP_MAX_S, traceRows,
     lapTimeAt, bestLapUpTo, fastestLapUpTo, raceEvents, eventsAtLap,
-    raceSummary,
+    raceSummary, finalClassification, resultText,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -1352,5 +1352,123 @@ describe('raceSummary', () => {
         const s = raceSummary(buildRace(p));
         expect(s).toMatchObject({ redFlags: 0, safetyCars: 0, stops: 0, leaders: 0 });
         expect(s.fastest).toBeNull();
+    });
+});
+
+describe('finalClassification', () => {
+    it('orders by the classified position, not by position on the road', () => {
+        const r = finalClassification(buildRace(payload()));
+        expect(r.map((x) => x.code)).toEqual(['VER', 'LEC']);
+        expect(r[0].pos).toBe(1);
+    });
+
+    it('measures the gap between two crossings of the line', () => {
+        // Both cars completed three laps; VER crossed at 2.4 and LEC at 2.9.
+        const r = finalClassification(buildRace(payload()));
+        expect(r[0].gap).toBeNull();              // the winner has no gap
+        expect(r[1].gap).toBeCloseTo(0.5, 6);
+    });
+
+    it('does NOT keep counting after the winner has finished', () => {
+        // The replay runs on past the flag; a gap taken from the live
+        // intervals would grow with it. This is the bug the function exists
+        // to avoid, so it is worth stating: the gap is a property of the
+        // finish, and nothing after the finish can change it.
+        const p = payload();
+        p.duration = 900;
+        expect(finalClassification(buildRace(p))[1].gap).toBeCloseTo(0.5, 6);
+    });
+
+    it('reports laps down instead of a gap for a lapped car', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 2, finish: 3, status: '+1 Lap' });
+        p.cars['4'] = p.cars['16'];
+        p.crossings['4'] = [[0, 0], [1, 1.1], [2, 2.2]];
+        const nor = finalClassification(buildRace(p)).find((x) => x.code === 'NOR');
+        expect(nor.gap).toBeNull();
+        expect(nor.lapsDown).toBe(1);
+        expect(nor.finished).toBe(true);
+    });
+
+    it('marks a retirement as unclassified and keeps the sheet’s wording', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, finish: null, status: 'Accident' });
+        p.cars['4'] = p.cars['16'];
+        p.crossings['4'] = [[0, 0]];
+        const r = finalClassification(buildRace(p));
+        const nor = r[r.length - 1];              // no position: sorts last
+        expect(nor.code).toBe('NOR');
+        expect(nor.finished).toBe(false);
+        expect(nor.status).toBe('Accident');
+    });
+
+    it('counts the positions a driver gained from the grid', () => {
+        const p = payload();
+        p.drivers[0].grid = 5;                    // VER starts fifth, wins
+        const r = finalClassification(buildRace(p));
+        expect(r[0].gained).toBe(4);
+        expect(r[1].gained).toBe(0);
+    });
+
+    it('drops a gap that would contradict the order it sits in', () => {
+        // A penalty separates the classification from the road: Sainz was
+        // fourth on the road at Australia 2023 and classified twelfth, so his
+        // crossing put a smaller gap beside a lower position. His real gap is
+        // that plus a penalty the payload does not carry.
+        const p = payload();
+        p.drivers[1].finish = 3;                     // LEC demoted behind NOR
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 2, finish: 2, status: 'Finished' });
+        p.cars['4'] = p.cars['16'];
+        p.crossings['4'] = [[0, 0], [1, 1.1], [2, 1.6], [3, 3.4]];   // 1.0s back
+        const r = finalClassification(buildRace(p));
+        expect(r.map((x) => x.code)).toEqual(['VER', 'NOR', 'LEC']);
+        expect(r[1].gap).toBeCloseTo(1.0, 6);        // P2 keeps its gap
+        expect(r[2].gap).toBeNull();                 // P3's would go backwards
+    });
+
+    it('keeps every gap when the order and the road agree', () => {
+        const r = finalClassification(buildRace(payload()));
+        expect(r[1].gap).toBeCloseTo(0.5, 6);
+    });
+
+    it('is safe on a race with no crossings at all', () => {
+        const p = payload();
+        p.crossings = {};
+        const r = finalClassification(buildRace(p));
+        expect(r).toHaveLength(2);
+        expect(r[0].gap).toBeNull();
+    });
+});
+
+describe('resultText', () => {
+    const row = (over) => ({ finished: true, lapsDown: 0, gap: null, status: 'Finished', ...over });
+
+    it('gives the winner a word, not a zero', () => {
+        expect(resultText(row({ gap: null }), 0)).toBe('WINNER');
+    });
+
+    it('gives a car on the lead lap its finishing gap', () => {
+        expect(resultText(row({ gap: 12.3456 }), 1)).toBe('+12.3');
+    });
+
+    it('gives a lapped car the lap count, not a time', () => {
+        // A time would be measured against a lap the car never ran.
+        expect(resultText(row({ lapsDown: 1, gap: 4 }), 5)).toBe('+1 LAP');
+        expect(resultText(row({ lapsDown: 3 }), 9)).toBe('+3 LAPS');
+    });
+
+    it('gives a retirement the classifier’s own word', () => {
+        // "Accident" is information; "DNF" is not.
+        expect(resultText(row({ finished: false, status: 'Accident' }), 18)).toBe('ACCIDENT');
+        expect(resultText(row({ finished: false, status: '' }), 19)).toBe('DNF');
+    });
+
+    it('does not call an unclassified car the winner', () => {
+        // Position zero in a list is not the same thing as having won.
+        expect(resultText(row({ finished: false, status: 'Withdrew' }), 0)).toBe('WITHDREW');
+    });
+
+    it('survives a missing row', () => {
+        expect(resultText(null, 0)).toBe('');
     });
 });

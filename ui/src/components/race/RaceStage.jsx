@@ -27,6 +27,7 @@ import FlagOverlay from './FlagOverlay';
 import RaceControl from './RaceControl';
 import LapScrubber from './LapScrubber';
 import RaceCard from './RaceCard';
+import RaceEnding from './RaceEnding';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
@@ -37,6 +38,8 @@ import {
     buildRace, carAt, statusAt, lapAt, messagesUpTo, weatherAt,
     standingsAt, safetyCarAt, gridSlots, GRID_BLEND_S,
 } from '../../lib/race';
+import { directorShot, SHOT_LABEL } from '../../lib/director';
+import { cameraStep, isWide, FOCUS_ZOOM, WIDE_ZOOM } from '../../lib/camera';
 import { F1, MONO, MAXW } from '../../theme';
 
 const SPEEDS = [1, 2, 5, 10];
@@ -60,10 +63,36 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // so it updates every second instead of freezing for a whole lap.
     const [second, setSecond] = useState(0);
 
+    // --- the camera -------------------------------------------------------
+    // Who the map is watching: a driver number, or null for the whole circuit.
+    const [focus, setFocus] = useState(null);
+    // Whether the director is choosing that driver for you.
+    const [director, setDirector] = useState(false);
+    // What the director is currently watching and why. Set only when it cuts,
+    // not once a second — a new object every second is a render every second.
+    const [shotOn, setShotOn] = useState(null);
+    // The race is over and the result is on screen.
+    const [ended, setEnded] = useState(false);
+
     const trackRef = useRef(null);
     const clockLabelRef = useRef(null);
     const weatherRef = useRef(null);
     const statusCursor = useRef(0);
+
+    // Read on the hot path, so they are refs as well as state: putting them in
+    // onTick's dependencies would rebuild the tick callback on every click.
+    const focusRef = useRef(null);
+    const directorRef = useRef(false);
+    focusRef.current = focus;
+    directorRef.current = director;
+
+    // The camera's own state. `cam` is where it is now, `shot` is the
+    // director's current choice, `dirSec` is the last race-second the director
+    // was asked — it runs once a second, not once a frame.
+    const cam = useRef(null);
+    const shot = useRef(null);
+    const dirSec = useRef(-1);
+    const lastWall = useRef(0);
 
     // --- load -------------------------------------------------------------
     useEffect(() => {
@@ -88,15 +117,33 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // de-collide them, but on a grid that stacks into a column of tags taller
     // than the circuit. Identity lives in the tower; the map carries team
     // colour and position.
-    const cars = useMemo(() => [
-        ...(race || { cars: [] }).cars.map((c) => ({
+    // WHO THE MAP IS WATCHING, whoever chose them. Everything downstream —
+    // the name on the car, the tower's relative column, the chip — reads this
+    // rather than `focus`, so a driver the director picked is as visible as
+    // one the viewer picked by hand.
+    const watched = focus || (director ? shotOn?.driver || null : null);
+
+    const cars = useMemo(() => {
+        const list = (race?.cars || []).map((c) => ({
             id: c.number, color: c.color, shape: 'disc',
-        })),
-        // The safety car is always in the list and simply hidden when it is not
-        // out. Adding and removing it would rebuild every marker in the layer,
-        // which drops the cars for a frame each time one is deployed.
-        { id: 'sc', color: '#FFD024', shape: 'ring', label: 'SC' },
-    ], [race]);
+            // THE CAR BEING FOLLOWED IS THE ONLY ONE WITH A NAME ON IT. All
+            // twenty labelled stacks into a column of tags taller than the
+            // circuit; identity otherwise lives in the tower. The one you
+            // picked is the exception, because a zoomed map that does not say
+            // whose car is in the middle of it is a puzzle.
+            label: c.number === watched ? c.code : undefined,
+        }));
+        return [
+            ...list.filter((c) => c.id !== watched),
+            // The safety car is always in the list and simply hidden when it is
+            // not out. Adding and removing it would rebuild every marker in the
+            // layer, which drops the cars for a frame each time one is deployed.
+            { id: 'sc', color: '#FFD024', shape: 'ring', label: 'SC' },
+            // Drawn last, so the car being followed sits on top of the field
+            // it is in the middle of.
+            ...list.filter((c) => c.id === watched),
+        ];
+    }, [race, watched]);
 
     const grid = useMemo(() => (race ? gridSlots(race) : new Map()), [race]);
 
@@ -105,9 +152,73 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         [race],
     );
 
+    // Where the camera sits when it is showing the whole circuit: the middle
+    // of the viewBox, in the same track units the cars are moved in. Zoom
+    // alone is not enough to go back to the wide shot — at k=1 with a stale
+    // centre the circuit is still off to one side.
+    const home = useMemo(() => {
+        if (!mapLayout) return null;
+        const [mx, my, vw, vh] = mapLayout.viewBox.split(' ').map(Number);
+        return { cx: mx + vw / 2, cy: my + vh / 2 };
+    }, [mapLayout]);
+
     // --- the hot path -----------------------------------------------------
     const onTick = useCallback((t) => {
         if (!race) return;
+
+        // --- THE CAMERA, BEFORE ANY CAR IS MOVED ---------------------------
+        // `move` projects through whatever the camera is looking at, so
+        // pointing it afterwards draws the whole field through last frame's
+        // camera and the grid visibly lags the circuit it is standing on.
+        if (home) {
+            // Wall time, not race time: how the motion feels is a property of
+            // the screen, and the screen runs at 1x whether the replay is at
+            // 1x or 10x.
+            const nowMs = typeof performance !== 'undefined'
+                ? performance.now() : Date.now();
+            let dt = (nowMs - lastWall.current) / 1000;
+            lastWall.current = nowMs;
+            if (!(dt > 0) || dt > 1) dt = 1 / 60;
+
+            let watch = focusRef.current;
+            if (!watch && directorRef.current) {
+                // Once a race-second. A shot that could change sixty times a
+                // second would not be a shot, and the director's answer cannot
+                // change meaningfully inside one anyway.
+                const sec = Math.floor(t);
+                if (sec !== dirSec.current) {
+                    dirSec.current = sec;
+                    const before = shot.current;
+                    shot.current = directorShot(race, t, shot.current);
+                    if (shot.current !== before) {
+                        setShotOn({
+                            reason: shot.current.reason,
+                            driver: shot.current.driver,
+                        });
+                    }
+                }
+                watch = shot.current?.driver || null;
+            }
+
+            let target = { ...home, k: WIDE_ZOOM };
+            if (watch) {
+                const car = race.byNumber[watch];
+                const p = car && carAt(car, race, t);
+                // A car with no position this frame HOLDS the camera where it
+                // is. Diving back to the middle of the circuit because the
+                // data went quiet for half a second is the one move a camera
+                // must never make.
+                target = p && p.on ? { cx: p.x, cy: -p.y, k: FOCUS_ZOOM } : null;
+            }
+
+            cam.current = cameraStep(cam.current || { ...home, k: WIDE_ZOOM }, target, dt);
+            // Once the pull-back has finished, stop transforming the map at
+            // all — a track drawn through a scale of 1.0001 is still being
+            // composited and still rounding every sub-pixel.
+            if (!watch && isWide(cam.current)) trackRef.current?.look(null);
+            else trackRef.current?.look(cam.current.cx, cam.current.cy, cam.current.k);
+        }
+
         // NOTE THE MINUS ON Y. The SVG y axis grows downward, so the track
         // outline, the pit lane and the pit box are all drawn at -Y (see
         // buildMapLayout) and lap mode negates its car the same way. Race mode
@@ -171,12 +282,14 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 ? `${w.track.toFixed(0)}°C TRACK · ${w.air.toFixed(0)}°C AIR${w.rain ? ' · RAIN' : ''}`
                 : '';
         }
-    }, [race, grid]);
+    }, [race, grid, home]);
 
     const clock = useClock({
         duration: race?.duration || 0,
         speed,
         onTick,
+        // The race now ENDS rather than simply stopping.
+        onEnd: () => setEnded(true),
     });
 
     // Park every car at the start before the first play, and re-park whenever
@@ -187,6 +300,13 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         clock.reset();
         statusCursor.current = 0;
         setLap(1);
+        setEnded(false);
+        // A new race is a new camera. Carrying the last one over points a
+        // 3.2x zoom at a coordinate on a circuit that is no longer loaded.
+        cam.current = null;
+        shot.current = null;
+        dirSec.current = -1;
+        setFocus(null);
         // Park on the grid, not on the measured start positions.
         for (const c of race.cars) {
             const g = grid.get(c.number);
@@ -201,19 +321,42 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // that REMOUNTS them leaves the JSX defaults on screen until the next
     // tick — crossing the narrow/desktop breakpoint swaps the whole tower
     // block, which showed "0:00" beside lap 20. Repaint on those changes.
+    // `focus` and `director` are here for the same reason: they are read off
+    // refs on the hot path, so nothing else would repaint the map when one of
+    // them changes while the replay is paused — which is exactly when someone
+    // clicks a driver to look at them.
     useEffect(() => {
         if (race) onTick(clock.timeRef.current);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [narrow, race, onTick]);
+    }, [narrow, race, onTick, focus, director]);
 
     /** Jump to a lap. This is the primary way to move through a race. */
     const scrubTo = useCallback((targetLap) => {
         if (!race) return;
         const row = race.lapStarts.find(([l]) => l === targetLap);
         const t = row ? row[1] : 0;
+        setEnded(false);
         clock.seek(t);
         onTick(t);
     }, [race, clock, onTick]);
+
+    /** Follow a driver, or let them go if they are already being followed. */
+    const pick = useCallback((num) => {
+        setFocus((prev) => (prev === num ? null : num));
+        // Picking a driver by hand takes the camera off the director. Leaving
+        // both on means the director silently overrules the next cut and the
+        // click looks broken.
+        setDirector(false);
+        setShotOn(null);
+    }, []);
+
+    const toggleDirector = useCallback(() => {
+        setDirector((on) => {
+            if (!on) { shot.current = null; dirSec.current = -1; setFocus(null); }
+            else setShotOn(null);
+            return !on;
+        });
+    }, []);
 
     // Space and the arrows. A lap is the unit a race is watched in, so that is
     // what an arrow moves — dragging a scrubber 1/58th of its width to see the
@@ -226,7 +369,11 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         prev: () => scrubTo(Math.max(1, lap - 1)),
         next: () => scrubTo(Math.min(race?.totalLaps ?? 1, lap + 1)),
         restart: () => scrubTo(1),
-    }), [clock, scrubTo, lap, race]), !!race);
+        director: toggleDirector,
+        // One key that always gets you back to the whole circuit, whichever
+        // of the two things is holding the camera.
+        escape: () => { setFocus(null); setDirector(false); setShotOn(null); },
+    }), [clock, scrubTo, lap, race, toggleDirector]), !!race);
 
     if (loading) return <StageMessage variant="loading" title={raceName || 'Race'} />;
     if (error) {
@@ -299,7 +446,62 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 </span>
                 <StatusBanner span={status} message={caption} />
 
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                <div style={{
+                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                    {/* WHAT THE CAMERA IS DOING, and the way out of it. A
+                        zoomed map with no label is a map someone has to work
+                        out; this says whose car is in the middle of it and
+                        why, and the ✕ is the one control that always goes
+                        back to the whole circuit. */}
+                    {(focus || director) && (
+                        <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '3px 4px 3px 8px',
+                            background: 'rgba(255,255,255,0.07)',
+                            fontFamily: MONO, fontSize: 9, fontWeight: 700,
+                            letterSpacing: 1, color: F1.text, whiteSpace: 'nowrap',
+                        }}>
+                            <span style={{
+                                width: 5, height: 5, borderRadius: '50%',
+                                background: watched
+                                    ? (race.byNumber[watched]?.color || F1.red) : F1.red,
+                            }} />
+                            {focus
+                                ? `FOLLOWING ${race.byNumber[focus]?.code || ''}`
+                                : ['DIRECTOR',
+                                   shotOn && SHOT_LABEL[shotOn.reason],
+                                   watched && race.byNumber[watched]?.code]
+                                    .filter(Boolean).join(' · ')}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setFocus(null); setDirector(false); setShotOn(null);
+                                }}
+                                title="Back to the whole circuit (Esc)"
+                                style={{
+                                    border: 'none', background: 'transparent',
+                                    color: F1.faint, cursor: 'pointer',
+                                    fontSize: 11, lineHeight: 1, padding: '0 3px',
+                                }}
+                            >✕</button>
+                        </span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={toggleDirector}
+                        title="Let the camera find the story (D)"
+                        style={{
+                            padding: '5px 9px', fontSize: 10, fontWeight: 700,
+                            fontFamily: MONO, letterSpacing: 1, cursor: 'pointer',
+                            border: 'none',
+                            background: director ? F1.red : 'transparent',
+                            color: director ? '#fff' : F1.dim,
+                        }}
+                    >DIRECTOR</button>
+                    <span style={{
+                        width: 1, height: 14, background: F1.line, margin: '0 2px',
+                    }} />
                     {SPEEDS.map((s) => (
                         <button key={s} onClick={() => setSpeed(s)} style={{
                             padding: '5px 9px', fontSize: 11, fontWeight: 700,
@@ -310,6 +512,22 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     ))}
                 </div>
             </div>
+
+            {/* A SCRIM UNDER THE TOWER. At the wide shot a circuit's bounding
+                box almost never reaches this column, which is why the tower
+                never needed one. A camera at 3.2x fills the whole band, so the
+                running order ended up printed over a brightly lit corner. The
+                gradient fades out before the map proper, so it costs nothing
+                at the wide shot. */}
+            {!narrow && (
+                <div style={{
+                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                    width: towerWidth + 24, zIndex: 11, pointerEvents: 'none',
+                    background: 'linear-gradient(90deg,'
+                        + ' rgba(11,11,15,0.94) 0%, rgba(11,11,15,0.88) 58%,'
+                        + ' rgba(11,11,15,0) 100%)',
+                }} />
+            )}
 
             {/* timing tower */}
             {!narrow && (
@@ -334,7 +552,8 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                             fontVariantNumeric: 'tabular-nums',
                         }}>0:00</span>
                     </div>
-                    <TimingTower race={race} lap={lap} second={second} status={status} narrow={narrow} />
+                    <TimingTower race={race} lap={lap} second={second} status={status}
+                        narrow={narrow} focus={watched} onPick={pick} />
                 </div>
             )}
 
@@ -361,6 +580,17 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
             {/* The flag, across the whole stage. Sits above the map so the
                 announcement reads, below the transport so controls stay live. */}
             <FlagOverlay span={status} />
+
+            {/* The flag, and then the sheet. It goes over the stage rather
+                than replacing it, because the map underneath is the last
+                frame of the race. */}
+            {ended && (
+                <RaceEnding
+                    race={race} narrow={narrow}
+                    onClose={() => setEnded(false)}
+                    onReplay={() => { scrubTo(1); clock.play(); }}
+                />
+            )}
 
             {!greeted && (
                 <RaceCard
@@ -472,7 +702,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     </span>
                 </div>
                 <TimingTower race={race} lap={lap} second={second}
-                    status={status} narrow={narrow} />
+                    status={status} narrow={narrow} focus={watched} onPick={pick} />
             </div>
             {strategy}
         </>

@@ -1024,6 +1024,115 @@ export const raceSummary = (race) => {
     };
 };
 
+// --- the finish -----------------------------------------------------------
+/**
+ * The final classification, the way a result sheet reads it.
+ *
+ * THE GAP IS NOT `intervalsAt(race, duration)`. That answers "how far behind
+ * the leader is this car on the road right now", and once the leader has taken
+ * the flag it keeps counting — sampled at the end of Australia 2023 it reported
+ * the runner-up 174 s behind, which is simply how long the replay ran on after
+ * the winner finished. A finishing gap is a difference between two crossings
+ * of the same line: when both cars completed the same number of laps, it is
+ * the time between them arriving.
+ *
+ * Cars that did not are described the way the sheet describes them — FastF1's
+ * own `status` already says "+1 Lap" or "Accident", and it is the classifier's
+ * word rather than ours.
+ *
+ * Position comes from `finish`, which is the CLASSIFIED position. It has to:
+ * a lapped car's position on the road at the flag disagrees with the result
+ * (Pérez was second on the road and fourth in the results at Abu Dhabi 2022),
+ * and the result is the thing a classification screen exists to show.
+ */
+export const finalClassification = (race) => {
+    const last = new Map();
+    for (const [num, rows] of Object.entries(race.crossings || {})) {
+        if (rows.length) last.set(num, rows[rows.length - 1]);
+    }
+
+    // Whoever got furthest, and got there first.
+    let lead = null;
+    for (const [num, [p, t]] of last) {
+        if (!lead || p > lead.p || (p === lead.p && t < lead.t)) lead = { num, p, t };
+    }
+
+    const classified = (s) => /finish|lap/i.test(s || '');
+
+    const rows = race.cars.map((c) => {
+        const l = last.get(c.number);
+        const down = lead && l ? Math.round(lead.p - l[0]) : null;
+        const onLeadLap = down === 0;
+        return {
+            num: c.number,
+            code: c.code,
+            name: c.name,
+            team: c.team,
+            color: c.color,
+            pos: c.finish ?? null,
+            grid: c.grid ?? null,
+            status: c.status || '',
+            finished: classified(c.status),
+            // Positions gained from the grid. Negative is lost; null when
+            // either end of the sum is missing.
+            gained: c.finish && c.grid ? c.grid - c.finish : null,
+            gap: onLeadLap && lead && c.number !== lead.num
+                ? Math.max(0, l[1] - lead.t)
+                : null,
+            lapsDown: onLeadLap ? 0 : down,
+        };
+    });
+
+    // Unclassified cars have no finishing position and sort to the bottom in
+    // grid order, which is the only order left that means anything.
+    rows.sort((a, b) => {
+        if (a.pos && b.pos) return a.pos - b.pos;
+        if (a.pos) return -1;
+        if (b.pos) return 1;
+        return (a.grid || 99) - (b.grid || 99);
+    });
+
+    // A GAP MUST NEVER CONTRADICT THE ORDER IT SITS IN.
+    //
+    // The position is the classification and the gap is measured on the road,
+    // and a penalty separates the two: Sainz finished fourth on the road at
+    // Australia 2023 and was classified twelfth, so his crossing put +1.6 s
+    // beside P12 while P11 read +6.6 s. His real gap is that plus a five
+    // second penalty the payload does not carry, so the honest answer is not
+    // to print one. Any row whose gap would go backwards up the sheet loses
+    // it; the rows around it keep theirs.
+    let floor = null;
+    for (const r of rows) {
+        if (r.gap == null) continue;
+        if (floor != null && r.gap < floor) { r.gap = null; continue; }
+        floor = r.gap;
+    }
+    return rows;
+};
+
+/**
+ * What goes in the result column for one classified row.
+ *
+ * Four different things share one column, which is why this is a function and
+ * not a template string at the call site: the winner gets a word rather than
+ * a meaningless `+0.000`, a car on the lead lap gets a time, a lapped car gets
+ * the lap count — a time would be nonsense, it is measured against a lap the
+ * car never ran — and anyone who did not finish gets the classifier's own word
+ * for why, because "Accident" is information and "DNF" is not.
+ */
+export const resultText = (row, index) => {
+    if (!row) return '';
+    if (!row.finished) return (row.status || 'DNF').toUpperCase();
+    if (index === 0) return 'WINNER';
+    if (row.lapsDown > 0) return `+${row.lapsDown} LAP${row.lapsDown > 1 ? 'S' : ''}`;
+    // ONE DECIMAL, not three. A result sheet prints thousandths and it is
+    // tempting to match it, but the crossings this is measured between are
+    // rounded to a tenth in the payload — checked against the official
+    // results, Hamilton's +0.179 at Australia comes out of them as +0.3.
+    // Printing +0.300 would be claiming a millisecond we do not have.
+    return row.gap == null ? '—' : `+${row.gap.toFixed(1)}`;
+};
+
 // --- the starting grid ----------------------------------------------------
 /** How long the grid formation takes to dissolve into the real positions. */
 export const GRID_BLEND_S = 3;

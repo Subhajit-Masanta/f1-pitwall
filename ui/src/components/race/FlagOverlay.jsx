@@ -62,6 +62,19 @@ const KEYFRAMES = `
   0%   { opacity: 0; transform: translate3d(14px,0,0); }
   100% { opacity: 1; transform: translate3d(0,0,0); }
 }
+@keyframes pw-fin-in {
+  0%   { opacity: 0; transform: translate3d(0,18px,0); }
+  100% { opacity: 1; transform: translate3d(0,0,0); }
+}
+@keyframes pw-fin-rise {
+  0%   { transform: scaleY(0); }
+  100% { transform: scaleY(1); }
+}
+@keyframes pw-chq {
+  0%   { opacity: 0; transform: translate3d(0,0,0) scale(1.35); }
+  18%  { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(0,0,0) scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   [data-pw-flag] * { animation: none !important; }
 }

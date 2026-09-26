@@ -39,6 +39,21 @@ const COLUMNS = [
     ['best', 'BEST'],
 ];
 
+/**
+ * The relative column, which only exists while a driver is being followed.
+ *
+ * It is the column an onboard needs and no other view does: everyone ahead of
+ * you as a negative number and everyone behind as a positive one, so the two
+ * cars either side of yours are the two smallest numbers on the screen. It
+ * falls out of the leader gaps for free — both are measured against the same
+ * reference, so the difference between any two of them is the time between
+ * those two cars, and that stays true for a car a lap down.
+ */
+const REL = ['rel', 'REL'];
+
+/** A signed second, padded so + and - land in the same column. */
+const fmtRel = (d) => (d == null ? '—' : `${d < 0 ? '-' : '+'}${Math.abs(d).toFixed(3)}`);
+
 /** m:ss.mmm — a lap time, the way a timing screen writes one. */
 const fmtLap = (t) => {
     if (t == null) return '—';
@@ -47,8 +62,21 @@ const fmtLap = (t) => {
     return m ? `${m}:${s}` : s;
 };
 
-const TimingTower = ({ race, lap, second, status, narrow }) => {
+const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }) => {
     const [column, setColumn] = React.useState('leader');
+
+    // Following a driver switches the column to the one that view is about,
+    // and letting them go puts it back. Doing it any other way means every
+    // viewer who clicks a driver then has to find a second control before the
+    // screen says anything about the driver they just picked.
+    //
+    // ON THE TRANSITION, not on the driver. The director changes who it is
+    // watching eighty times over a race, and re-selecting the column at each
+    // cut would overrule a viewer who had chosen LAST or BEST.
+    const following = focus != null;
+    React.useEffect(() => {
+        setColumn(following ? 'rel' : 'leader');
+    }, [following]);
     // WHO IS IN THE PITS, BY TIME. This was keyed on the lap, and Australia
     // 2023 shows why that is wrong twice over: at lap 1 it badged five cars
     // PIT from lights-out because they pitted later in that lap, and at lap 8
@@ -135,6 +163,12 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
         if (column === 'last') return fmtLap(lapTimeAt(race, num, done));
         if (column === 'best') return fmtLap(bestLapUpTo(race, num, done));
         if (out.has(num)) return 'OUT';
+        if (column === 'rel' && focus) {
+            if (num === focus) return '—';
+            const me = gaps.get(focus);
+            const them = gaps.get(num);
+            return fmtRel(me == null || them == null ? null : them - me);
+        }
         if (i === 0) return 'LEADER';
         return fmtGap(column === 'ahead' ? ahead?.get(num) : gaps.get(num));
     };
@@ -159,7 +193,7 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                 fontSize: 8, fontWeight: 800, letterSpacing: 1,
             }}>
                 <span style={{ flex: 1, color: F1.faint }}>GAP TO</span>
-                {COLUMNS.map(([id, label]) => (
+                {(focus ? [REL, ...COLUMNS] : COLUMNS).map(([id, label]) => (
                     <button
                         key={id}
                         type="button"
@@ -178,13 +212,32 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                 const car = race.byNumber[num];
                 if (!car) return null;
                 const stint = stintAt(race, num, lap);
+                const on = num === focus;
+                // A ROW IS THE CONTROL THAT PICKS A DRIVER TO FOLLOW. It is a
+                // real button rather than a div with a click handler, so it
+                // arrives in the tab order and answers Enter, and it blurs
+                // itself the moment it is used — a focused button swallows
+                // Space, and Space is how the replay is played.
                 return (
-                    <div key={num} style={{
-                        display: 'flex', alignItems: 'center', gap: 7,
-                        padding: narrow ? '2px 5px' : '3px 7px',
-                        background: i % 2 ? 'transparent' : 'rgba(255,255,255,0.02)',
-                        opacity: out.has(num) ? 0.4 : 1,
-                    }}>
+                    <button
+                        key={num}
+                        type="button"
+                        onClick={onPick ? (e) => { e.currentTarget.blur(); onPick(num); } : undefined}
+                        disabled={!onPick}
+                        title={onPick ? `Follow ${car.code}` : undefined}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 7,
+                            width: '100%', textAlign: 'left',
+                            font: 'inherit', letterSpacing: 'inherit',
+                            padding: narrow ? '2px 5px' : '3px 7px',
+                            border: 'none',
+                            borderLeft: `2px solid ${on ? car.color : 'transparent'}`,
+                            cursor: onPick ? 'pointer' : 'default',
+                            background: on
+                                ? 'rgba(255,255,255,0.10)'
+                                : i % 2 ? 'transparent' : 'rgba(255,255,255,0.02)',
+                            opacity: out.has(num) ? 0.4 : 1,
+                        }}>
                         <span style={{
                             width: 15, textAlign: 'right', color: F1.dim,
                             fontVariantNumeric: 'tabular-nums',
@@ -217,7 +270,7 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                             fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
                             fontSize: narrow ? 9 : 10,
                         }}>{cell(num, i)}</span>
-                    </div>
+                    </button>
                 );
             })}
         </div>

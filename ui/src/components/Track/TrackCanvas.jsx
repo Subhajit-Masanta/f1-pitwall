@@ -14,6 +14,7 @@ import {
     memo, forwardRef, useRef, useEffect, useCallback, useImperativeHandle,
 } from 'react';
 import { F1, MONO, speedColor } from '../../theme';
+import { camProjection } from '../../lib/camera';
 import CarLayer from './CarLayer';
 
 const TrackCanvas = memo(forwardRef(({
@@ -22,24 +23,67 @@ const TrackCanvas = memo(forwardRef(({
 }, ref) => {
     const wrapRef = useRef(null);
     const layerRef = useRef(null);
-    const proj = useRef({ scale: 1, offX: 0, offY: 0 });
+    const svgRef = useRef(null);
+    // The projection that fits the whole circuit in the box. Never changes
+    // except on a resize.
+    const base = useRef({ scale: 1, offX: 0, offY: 0 });
+    // The projection actually in use: `base`, or `base` seen through a camera.
+    const proj = useRef(base.current);
+    // { cx, cy, k } in track units, or null for the whole circuit.
+    const cam = useRef(null);
+    // The viewBox last written, so an unchanged one is not written again.
+    const lastVB = useRef(null);
     // Last position per car in TRACK units, so a resize can re-project them.
     // Without this a parked car keeps the pixel position from the old
     // projection and visibly drifts off the start/finish line whenever the
     // stage resizes (opening the trace, rotating a phone, any window change).
     const lastPos = useRef({});
 
+    /**
+     * Point the map at the camera.
+     *
+     * The projection and the matching viewBox both come from `camProjection`,
+     * which is where the derivation and its test live — the cars are placed
+     * through the projection and the track is framed by the viewBox, and
+     * those two agreeing is the whole of "the field is on the circuit rather
+     * than beside it".
+     *
+     * A viewBox rather than a CSS transform because a transform scales the
+     * layer's BITMAP: the circuit came out soft at 3.2x next to the timing
+     * tower's text. This redraws it as vectors, so it is sharp at any zoom.
+     */
+    const applyCam = useCallback(() => {
+        const el = wrapRef.current;
+        const svg = svgRef.current;
+        if (!el) return;
+        const p = camProjection(
+            base.current, cam.current, el.clientWidth, el.clientHeight,
+        );
+        proj.current = { scale: p.scale, offX: p.offX, offY: p.offY };
+        if (!svg) return;
+        const next = p.vb
+            ? p.vb.map((v) => v.toFixed(2)).join(' ')
+            : mapLayout?.viewBox;
+        // Writing an identical attribute still invalidates paint in some
+        // engines, and at the wide shot this runs every frame for nothing.
+        if (next && next !== lastVB.current) {
+            svg.setAttribute('viewBox', next);
+            lastVB.current = next;
+        }
+    }, [mapLayout]);
+
     const recompute = useCallback(() => {
         const el = wrapRef.current;
         if (!el || !mapLayout) return;
         const [mx, my, vw, vh] = mapLayout.viewBox.split(' ').map(Number);
         const scale = Math.min(el.clientWidth / vw, el.clientHeight / vh);
-        proj.current = {
+        base.current = {
             scale,
             offX: (el.clientWidth - vw * scale) / 2 - mx * scale,
             offY: (el.clientHeight - vh * scale) / 2 - my * scale,
         };
-    }, [mapLayout]);
+        applyCam();
+    }, [mapLayout, applyCam]);
 
     /** Move a car, in TRACK units. The projection to pixels happens here. */
     const move = useCallback((id, x, y, inPit = false) => {
@@ -52,7 +96,22 @@ const TrackCanvas = memo(forwardRef(({
         layerRef.current?.place(id, x * scale + offX, y * scale + offY, inPit);
     }, []);
 
-    useImperativeHandle(ref, () => ({ move }), [move]);
+    /**
+     * Point the camera at a place on the circuit, or pass null to show all of
+     * it. Track units, and `k` is the zoom factor.
+     *
+     * Call it BEFORE the cars are moved on a given frame: `move` reads the
+     * projection this sets, so doing it the other way round places the field
+     * with one frame's stale camera.
+     */
+    const look = useCallback((cx, cy, k = 1) => {
+        cam.current = (cx == null || !Number.isFinite(cx) || !Number.isFinite(cy))
+            ? null
+            : { cx, cy, k };
+        applyCam();
+    }, [applyCam]);
+
+    useImperativeHandle(ref, () => ({ move, look }), [move, look]);
 
     useEffect(() => {
         const apply = () => {
@@ -110,6 +169,7 @@ const TrackCanvas = memo(forwardRef(({
     return (
         <div ref={wrapRef} style={{ position: 'absolute', inset: 0 }}>
             <svg
+                ref={svgRef}
                 width="100%" height="100%" viewBox={viewBox}
                 preserveAspectRatio="xMidYMid meet"
                 style={{

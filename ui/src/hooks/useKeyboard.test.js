@@ -58,8 +58,26 @@ describe('keyAction', () => {
         expect(keyAction(ev(' ', { altKey: true }))).toBeNull();
     });
 
+    it('toggles the director on D', () => {
+        expect(keyAction(ev('d'))).toBe('director');
+        expect(keyAction(ev('D'))).toBe('director');
+    });
+
+    it('lets Escape out of a focused control', () => {
+        // You start following a driver by clicking their row in the timing
+        // tower, so that button is what holds focus when you want out again.
+        // Escape is also the one key no control has its own use for.
+        expect(keyAction(ev('Escape'))).toBe('escape');
+        expect(keyAction(ev('Escape', { target: { tagName: 'BUTTON' } }))).toBe('escape');
+        expect(keyAction(ev('Esc'))).toBe('escape');
+    });
+
+    it('still hands a modified Escape to the browser', () => {
+        expect(keyAction(ev('Escape', { ctrlKey: true }))).toBeNull();
+    });
+
     it('ignores everything else', () => {
-        for (const k of ['a', 'Enter', 'Escape', 'Tab', '1', 'ArrowUp', 'ArrowDown']) {
+        for (const k of ['a', 'Enter', 'Tab', '1', 'ArrowUp', 'ArrowDown']) {
             expect(keyAction(ev(k))).toBeNull();
         }
     });

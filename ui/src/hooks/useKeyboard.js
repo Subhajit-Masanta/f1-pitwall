@@ -27,6 +27,13 @@ const INTERACTIVE = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'OPTION'])
  */
 export const keyAction = (e) => {
     if (!e || e.altKey || e.ctrlKey || e.metaKey) return null;
+
+    // ESCAPE IS THE EXCEPTION TO THE FOCUSED-CONTROL RULE, and it has to be:
+    // the way you follow a driver is by clicking their row in the timing
+    // tower, so the tower button is exactly what holds focus when you want
+    // out. No control has its own Escape behaviour to protect, either.
+    if (e.key === 'Escape' || e.key === 'Esc') return 'escape';
+
     const el = e.target;
     if (el && (INTERACTIVE.has(el.tagName) || el.isContentEditable)) return null;
 
@@ -45,6 +52,10 @@ export const keyAction = (e) => {
         case 'r':
         case 'R':
             return 'restart';
+        // D for director — the camera cutting between shots by itself.
+        case 'd':
+        case 'D':
+            return 'director';
         default:
             return null;
     }
