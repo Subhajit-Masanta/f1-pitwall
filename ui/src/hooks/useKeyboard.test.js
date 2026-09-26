@@ -76,6 +76,20 @@ describe('keyAction', () => {
         expect(keyAction(ev('Escape', { ctrlKey: true }))).toBeNull();
     });
 
+    it('opens the shortcut sheet on ?', () => {
+        // The key that says what the other keys are has to work when somebody
+        // is lost — including with a control focused, which is the usual state
+        // after clicking anything.
+        expect(keyAction(ev('?'))).toBe('help');
+        expect(keyAction(ev('?', { target: { tagName: 'BUTTON' } }))).toBe('help');
+    });
+
+    it('does not treat shift as a browser modifier', () => {
+        // `?` IS Shift+/. Refusing shifted keys would refuse the only one.
+        expect(keyAction(ev('?', { shiftKey: true }))).toBe('help');
+        expect(keyAction(ev('?', { ctrlKey: true }))).toBeNull();
+    });
+
     it('ignores everything else', () => {
         for (const k of ['a', 'Enter', 'Tab', '1', 'ArrowUp', 'ArrowDown']) {
             expect(keyAction(ev(k))).toBeNull();

@@ -9,6 +9,8 @@ Cache access goes through `database.cache_get` / `database.cache_set` rather
 than importing the names directly. That keeps ONE patch point for tests that
 need to bypass Mongo — see tests/test_replay_integration.py::no_cache.
 """
+from datetime import datetime, timedelta, timezone
+
 import fastf1
 import numpy as np
 
@@ -16,26 +18,74 @@ import database
 from services.session_loader import CACHE_SCHEMA, load_session, pd_isna
 
 
+# How long after the lights go out before a race is worth offering.
+#
+# NOT the start time itself: a grand prix runs up to two hours, and there is
+# nothing to replay while it is still being run. Three hours covers a normal
+# race, a red-flagged one, and the short wait for timing data to land —
+# without hiding a race that finished this morning for the rest of the day.
+RACE_SETTLE = timedelta(hours=3)
+
+
+def _naive_utc(ts):
+    """A schedule timestamp as a naive UTC datetime, or None if it has none."""
+    if ts is None or pd_isna(ts):
+        return None
+    dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+    if getattr(dt, "tzinfo", None) is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def has_run(race_start_utc, event_date, now):
+    """
+    Has this race already happened?
+
+    The calendar FastF1 returns is the WHOLE season, so from March onwards the
+    picker offered a dozen grands prix that do not exist yet and every one of
+    them failed on selection. A season is a list of races that have happened.
+
+    `Session5DateUtc` is the race, and stays the race across all three weekend
+    formats — conventional, sprint qualifying and sprint shootout all put it
+    fifth. Older seasons do not always carry it, hence the fallback: EventDate
+    is a DAY with no time on it, so the safe line is the end of that day.
+
+    Anything with no date at all is shown rather than hidden — a missing
+    timestamp is not evidence that a race has not happened.
+    """
+    start = _naive_utc(race_start_utc)
+    if start is not None:
+        return now >= start + RACE_SETTLE
+    day = _naive_utc(event_date)
+    if day is not None:
+        return now >= day + timedelta(days=1)
+    return True
+
+
 def get_race_calendar(year: int):
     """
-    Get the full F1 schedule for a specific year.
+    The races of a season that have actually been run.
     Returns: List of races with Round Number, Name, and Location.
     """
     print(f"[INFO] Fetching {year} Calendar...")
     schedule = fastf1.get_event_schedule(year)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Filter out "Testing" sessions (RoundNumber 0), we only want real races.
     races = []
     for row in schedule.itertuples():
-        if row.RoundNumber > 0:
-            races.append(
-                {
-                    "round": int(row.RoundNumber),
-                    "name": row.EventName,
-                    "location": row.Location,
-                    "date": str(row.EventDate.date()),
-                }
-            )
+        if row.RoundNumber <= 0:
+            continue
+        if not has_run(getattr(row, "Session5DateUtc", None), row.EventDate, now):
+            continue
+        races.append(
+            {
+                "round": int(row.RoundNumber),
+                "name": row.EventName,
+                "location": row.Location,
+                "date": str(row.EventDate.date()),
+            }
+        )
 
     return races
 

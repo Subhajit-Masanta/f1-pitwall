@@ -28,6 +28,7 @@ import RaceControl from './RaceControl';
 import LapScrubber from './LapScrubber';
 import RaceCard from './RaceCard';
 import RaceEnding from './RaceEnding';
+import Shortcuts from '../Shortcuts';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
@@ -43,6 +44,16 @@ import { cameraStep, isWide, FOCUS_ZOOM, WIDE_ZOOM } from '../../lib/camera';
 import { F1, MONO, MAXW } from '../../theme';
 
 const SPEEDS = [1, 2, 5, 10];
+
+/** What `?` puts on screen. A race has the most of any mode. */
+const KEYS = [
+    { keys: ['SPACE', 'K'], what: 'Play or pause' },
+    { keys: ['←', '→'], what: 'Previous or next lap' },
+    { keys: ['R', 'HOME'], what: 'Back to lap 1' },
+    { keys: ['D'], what: 'Director camera' },
+    { keys: ['ESC'], what: 'Close, or stop following' },
+    { keys: ['?'], what: 'This list' },
+];
 
 const RaceStage = ({ year, round, session = 'R', raceName }) => {
     const narrow = useIsNarrow();
@@ -75,6 +86,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // finished and the chequered flag is worth throwing, 'sheet' when someone
     // asked for it mid-race and an announcement would be theatre.
     const [ended, setEnded] = useState(null);
+    // The shortcut sheet. Owned here rather than by the app shell so that
+    // Escape's ordering — sheet, then result, then camera — lives in one
+    // place instead of being negotiated between two key handlers.
+    const [help, setHelp] = useState(false);
 
     const trackRef = useRef(null);
     const clockLabelRef = useRef(null);
@@ -376,7 +391,15 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // Space and the arrows. A lap is the unit a race is watched in, so that is
     // what an arrow moves — dragging a scrubber 1/58th of its width to see the
     // next lap is not a control, it is a dare.
-    useKeyboard(useMemo(() => ({
+    useKeyboard(useMemo(() => {
+        // WHILE THE SHEET IS UP IT IS THE ONLY THING LISTENING. A modal that
+        // lets Space through starts the race behind the page that is
+        // explaining how to start the race.
+        if (help) {
+            const shut = () => setHelp(false);
+            return { help: shut, escape: shut };
+        }
+        return ({
         toggle: () => {
             setGreeted(true);
             if (clock.isPlaying) clock.pause(); else clock.play();
@@ -385,14 +408,15 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
         next: () => scrubTo(Math.min(race?.totalLaps ?? 1, lap + 1)),
         restart: () => scrubTo(1),
         director: toggleDirector,
-        // The way out of whatever is on top: the result sheet first, since it
-        // covers the stage, and otherwise the camera — whichever of the two
-        // things is holding it.
+        help: () => setHelp((h) => !h),
+        // The way out of whatever is on top: the result first, since it
+        // covers the stage, and otherwise the camera.
         escape: () => {
             if (ended) { setEnded(null); return; }
             setFocus(null); setDirector(false); setShotOn(null);
         },
-    }), [clock, scrubTo, lap, race, toggleDirector, ended]), !!race);
+        });
+    }, [clock, scrubTo, lap, race, toggleDirector, ended, help]), !!race);
 
     if (loading) return <StageMessage variant="loading" title={raceName || 'Race'} />;
     if (error) {
@@ -508,6 +532,17 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     )}
                     <button
                         type="button"
+                        onClick={(e) => { e.currentTarget.blur(); setHelp(true); }}
+                        title="Keyboard shortcuts (?)"
+                        aria-label="Keyboard shortcuts"
+                        style={{
+                            width: 26, height: 26, border: `1px solid ${F1.line}`,
+                            background: 'transparent', color: F1.dim, cursor: 'pointer',
+                            fontFamily: MONO, fontSize: 11, fontWeight: 700, lineHeight: 1,
+                        }}
+                    >?</button>
+                    <button
+                        type="button"
                         onClick={toggleDirector}
                         title="Let the camera find the story (D)"
                         style={{
@@ -603,6 +638,8 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
             {/* The flag, and then the sheet. It goes over the stage rather
                 than replacing it, because the map underneath is the last
                 frame of the race. */}
+            {help && <Shortcuts items={KEYS} onClose={() => setHelp(false)} />}
+
             {ended && (
                 <RaceEnding
                     race={race} narrow={narrow} announce={ended === 'flag'}

@@ -26,7 +26,12 @@ async def lifespan(app: FastAPI):
 
 
 # 2. Initialize the API (MUST BE FIRST)
-app = FastAPI(lifespan=lifespan)   #creates the web application object.
+app = FastAPI(
+    lifespan=lifespan,
+    title="F1 Pitwall API",
+    description="Formula 1 telemetry replay data, built on FastF1.",
+    contact={"name": "Subhajit Masanta"},
+)   #creates the web application object.
 # then fast api is just like template
                     
                     #FastAPI App / Controller + Routing    This is the entry point for your backend.

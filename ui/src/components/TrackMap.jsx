@@ -24,6 +24,7 @@ import SpeedTrace from './SpeedTrace';
 import DeltaBar from './DeltaBar';
 import SectorCompare from './SectorCompare';
 import StageMessage from './StageMessage';
+import Shortcuts from './Shortcuts';
 import DriverPicker from './stage/DriverPicker';
 import Transport from './stage/Transport';
 
@@ -210,16 +211,29 @@ const TrackMap = ({
         [dominanceSectors],
     );
 
+    // The shortcut sheet, and the keys it lists. Shorter than a race's: a
+    // single lap has nothing to step through and no camera to release.
+    const [help, setHelp] = useState(false);
+
     // ABOVE THE EARLY RETURNS. A hook called after one runs on some renders
     // and not others, which is the ordering trap that has already produced two
     // blank pages in this file.
     //
     // Space plays, R restarts. A single lap has nothing to step to, so the
     // arrows are left to the page rather than swallowed for nothing.
-    useKeyboard(useMemo(() => ({
-        toggle: () => (isPlaying ? pause() : handleStart()),
-        restart,
-    }), [isPlaying, pause, handleStart, restart]), !!trackData);
+    useKeyboard(useMemo(() => {
+        // The sheet swallows everything while it is up — see the same note in
+        // RaceStage. Space behind a modal is the one that actually bites.
+        if (help) {
+            const shut = () => setHelp(false);
+            return { help: shut, escape: shut };
+        }
+        return {
+            toggle: () => (isPlaying ? pause() : handleStart()),
+            restart,
+            help: () => setHelp(true),
+        };
+    }, [isPlaying, pause, handleStart, restart, help]), !!trackData);
 
     if (loading) {
         return <StageMessage variant="loading" title={raceName} />;
@@ -290,6 +304,17 @@ const TrackMap = ({
             background: `radial-gradient(120% 80% at 58% 46%, #15151C 0%, ${F1.bg} 62%)`,
             border: `1px solid ${F1.line}`,
         }}>
+            {help && (
+                <Shortcuts
+                    items={[
+                        { keys: ['SPACE', 'K'], what: 'Play or pause' },
+                        { keys: ['R', 'HOME'], what: 'Restart the lap' },
+                        { keys: ['?'], what: 'This list' },
+                    ]}
+                    onClose={() => setHelp(false)}
+                />
+            )}
+
             {/* header */}
             <div ref={headerRef} style={{
                 position: 'absolute', top: 0, left: 0, right: 0, zIndex: 14,
@@ -390,6 +415,17 @@ const TrackMap = ({
                             TRACE
                         </button>
                     )}
+                    <button
+                        type="button"
+                        onClick={(e) => { e.currentTarget.blur(); setHelp(true); }}
+                        title="Keyboard shortcuts (?)"
+                        aria-label="Keyboard shortcuts"
+                        style={{
+                            width: 26, height: 26, border: `1px solid ${F1.line}`,
+                            background: 'transparent', color: F1.dim, cursor: 'pointer',
+                            fontFamily: MONO, fontSize: 11, fontWeight: 700, lineHeight: 1,
+                        }}
+                    >?</button>
                     <MapControls playbackSpeed={playbackSpeed} setPlaybackSpeed={setPlaybackSpeed} />
                 </div>
             </div>

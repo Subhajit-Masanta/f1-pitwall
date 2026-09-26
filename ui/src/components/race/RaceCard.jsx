@@ -115,7 +115,7 @@ const RaceCard = ({ race, byNumber, narrow, onStart }) => {
                 <div style={{
                     marginTop: 10, fontFamily: MONO, fontSize: 9, color: F1.faint,
                     letterSpacing: 0.4,
-                }}>SPACE TO PLAY · ARROWS TO STEP A LAP</div>
+                }}>SPACE TO PLAY · ARROWS TO STEP A LAP · ? FOR KEYS</div>
             </div>
         </div>
     );

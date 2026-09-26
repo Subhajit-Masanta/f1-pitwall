@@ -117,9 +117,15 @@ const RaceSelector = ({
             <Select
                 ariaLabel="Grand Prix"
                 value={selected ? String(selected.round) : ''}
+                // The calendar only carries races that have been RUN, so a
+                // season can legitimately be empty — pick the current year in
+                // January and there is nothing to watch yet. An empty
+                // dropdown behind "Select a Grand Prix" reads as a bug; this
+                // says which of the two it is.
                 placeholder={loading
                     ? (waking ? 'Waking up the server…' : 'Loading calendar…')
-                    : 'Select a Grand Prix'}
+                    : races.length === 0 ? 'No races run yet this season'
+                        : 'Select a Grand Prix'}
                 options={races.map((race) => ({
                     value: String(race.round),
                     label: race.name,
@@ -127,7 +133,7 @@ const RaceSelector = ({
                     sub: `R${race.round}`,
                 }))}
                 onChange={(v) => onSelectRound(v ? parseInt(v, 10) : null)}
-                disabled={loading || !!error}
+                disabled={loading || !!error || races.length === 0}
                 minWidth={260}
                 maxWidth={380}
             />

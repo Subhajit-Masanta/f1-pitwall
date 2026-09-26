@@ -146,6 +146,23 @@ function App() {
           )}
         </>
       )}
+
+      {/* Whose this is. One line, on every page, in the same hairline
+          language as everything else — it belongs to the app rather than to
+          any one mode, so it lives in the shell. */}
+      <footer style={{
+        marginTop: 40, paddingTop: 16, borderTop: `1px solid ${F1.hair}`,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        fontSize: 11, letterSpacing: 0.4, color: F1.faint,
+      }}>
+        <span style={{ fontWeight: 700, letterSpacing: 1.4, color: F1.dim }}>
+          PITWALL
+        </span>
+        <span>
+          Built by <span style={{ color: F1.text }}>Subhajit Masanta</span>
+        </span>
+        <span style={{ marginLeft: 'auto' }}>Timing data from FastF1</span>
+      </footer>
      </div>
     </div>
   );

@@ -34,6 +34,14 @@ export const keyAction = (e) => {
     // out. No control has its own Escape behaviour to protect, either.
     if (e.key === 'Escape' || e.key === 'Esc') return 'escape';
 
+    // SO IS `?`, for the same reason and one more: it is the key that says
+    // what the other keys are, so it is the one that most needs to work when
+    // somebody is lost. It arrives as Shift+/ — shift is not a modifier that
+    // belongs to the browser, which is why only alt/ctrl/meta are refused
+    // above. Nothing here can be typed into: the app's only two inputs are
+    // sliders, so a printable key has no text to interrupt.
+    if (e.key === '?') return 'help';
+
     const el = e.target;
     if (el && (INTERACTIVE.has(el.tagName) || el.isContentEditable)) return null;
 
