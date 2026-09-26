@@ -24,6 +24,7 @@ import React from 'react';
 import { F1, MONO, COMPOUND, COMPOUND_LETTER } from '../../theme';
 import { strategyRows, lapAt, namedStop } from '../../lib/race';
 import TyreMark from './TyreMark';
+import { chartBox } from './chartBox';
 
 // The compound colours live with the marking that uses them.
 
@@ -151,7 +152,10 @@ const StrategyChart = ({ race, lap, narrow }) => {
     const anyStint = rows.some((r) => r.stints.length);
     if (!anyStint) return null;
 
-    const nameW = narrow ? 58 : 74;
+    // Shared with the race trace above, so a lap on one sits over the same
+    // lap on the other.
+    const box = chartBox(narrow);
+    const nameW = box.left;
 
     return (
         <div style={{
@@ -197,7 +201,9 @@ const StrategyChart = ({ race, lap, narrow }) => {
             {/* lap axis */}
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
                 <span style={{ width: nameW, flex: '0 0 auto' }} />
-                <div style={{ position: 'relative', flex: 1, height: 11 }}>
+                <div style={{
+                    position: 'relative', flex: 1, height: 11, marginRight: box.right,
+                }}>
                     {ticks.map((l) => (
                         <span key={l} style={{
                             position: 'absolute', left: `${((l - 1) / total) * 100}%`,
@@ -234,7 +240,7 @@ const StrategyChart = ({ race, lap, narrow }) => {
                         </span>
                         <div style={{
                             position: 'relative', flex: 1,
-                            height: narrow ? 13 : 15,
+                            height: narrow ? 13 : 15, marginRight: box.right,
                             background: 'rgba(255,255,255,0.03)',
                         }}>
                             {r.stints.map((s, k) => (
@@ -252,7 +258,7 @@ const StrategyChart = ({ race, lap, narrow }) => {
                     vanished under the stint blocks and survived only in the
                     gaps, which read as a rendering fault rather than a mark. */}
                 <div style={{
-                    position: 'absolute', left: nameW, right: 0, top: 0, bottom: 0,
+                    position: 'absolute', left: nameW, right: box.right, top: 0, bottom: 0,
                     pointerEvents: 'none',
                 }}>
                     {redLaps.map((l, k) => (

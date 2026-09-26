@@ -11,6 +11,7 @@ import { useOfficialRaceData } from '../hooks/useOfficialRaceData';
 import { useRaceLoop } from '../hooks/useRaceLoop';
 import { useIsNarrow } from '../hooks/useResponsive';
 import { useKeyboard } from '../hooks/useKeyboard';
+import { dominanceTally } from '../lib/geometry/compare';
 import { stageLayout } from './stage/stageLayout';
 import { F1, MONO, SPEED_GRADIENT } from '../theme';
 import { SESSION_LABEL } from '../lib/router';
@@ -39,7 +40,7 @@ const TrackMap = ({
     // Whether playback has actually been started, as distinct from whether the
     // telemetry happens to be loaded — compare mode preloads it.
     const [hasPlayed, setHasPlayed] = useState(false);
-    const [view, setView] = useState('map');   // 'map' | 'speed'
+    const [view, setView] = useState('map');   // 'map' | 'dominance' | 'speed'
     // Trace open/closed, remembered between visits.
     const [showTrace, setShowTrace] = useState(() => {
         try { return localStorage.getItem('pitwall.trace') !== '0'; } catch { return true; }
@@ -73,7 +74,7 @@ const TrackMap = ({
     const {
         trackData, mapLayout, speedTrace, telemetry, loading, error, reload,
         loadReplay, replayError, sectorBoundaries, officialSectorTimes, driver,
-        drivers, ghost, ghostLoading, loadGhost, compareTrace,
+        drivers, ghost, ghostLoading, loadGhost, compareTrace, dominanceSectors,
     } = useOfficialRaceData(year, round, session, referenceDriver);
 
     // The loop reads the ghost through a ref, so picking a driver mid-lap never
@@ -188,6 +189,26 @@ const TrackMap = ({
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [comparing, trackData, telemetry]);
+
+    // THE DOMINANCE MAP. Each mini-sector painted in the colour of whoever
+    // was quicker through it, so a lap time becomes a picture of where it was
+    // won. Team colours, because that is what the rest of the app uses to say
+    // which driver is which — a separate purple/green scale would be a second
+    // language for the same fact.
+    const domSectors = useMemo(() => {
+        if (!comparing || !dominanceSectors?.length || !mapLayout) return null;
+        const paths = mapLayout.sectorPaths(dominanceSectors);
+        return paths.map((sg) => ({
+            ...sg,
+            color: sg.winner === 'a' ? refColor
+                : sg.winner === 'b' ? ghostColor : F1.faint,
+        }));
+    }, [comparing, dominanceSectors, mapLayout, refColor, ghostColor]);
+
+    const domTally = useMemo(
+        () => (dominanceSectors?.length ? dominanceTally(dominanceSectors) : null),
+        [dominanceSectors],
+    );
 
     // ABOVE THE EARLY RETURNS. A hook called after one runs on some renders
     // and not others, which is the ordering trap that has already produced two
@@ -325,7 +346,11 @@ const TrackMap = ({
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
                     {mapLayout.speedSegments?.length > 0 && (
                         <div style={{ display: 'flex', gap: 1, background: F1.line }}>
-                            {[['map', 'MAP'], ['speed', 'SPEED']].map(([id, lbl]) => (
+                            {[
+                                ['map', 'MAP'],
+                                ...(domSectors ? [['dominance', 'DOMINANCE']] : []),
+                                ['speed', 'SPEED'],
+                            ].map(([id, lbl]) => (
                                 <button
                                     key={id}
                                     onClick={() => setView(id)}
@@ -377,7 +402,8 @@ const TrackMap = ({
                 position: 'absolute', left: L.timingSpace, right: 0,
                 top: L.mapTop, bottom: L.mapBottom,
             }}>
-                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view} cars={cars} />
+                <TrackCanvas ref={trackRef} mapLayout={mapLayout} view={view}
+                    cars={cars} dominance={domSectors} />
             </div>
 
             {/* legend — desktop only, it crowds a phone */}
@@ -399,6 +425,24 @@ const TrackMap = ({
                     </div>
                 </div>
             )}
+            {!narrow && view === 'dominance' && domTally && (
+                <div style={{
+                    position: 'absolute', top: L.mapTop + 8, right: 26, zIndex: 13,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    fontFamily: MONO, fontSize: 10, letterSpacing: 0.6,
+                }}>
+                    <span style={{ color: F1.faint }}>FASTER THROUGH</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: refColor }}>
+                        <span style={{ width: 10, height: 3, background: refColor }} />
+                        {refCode} {domTally.a}
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: ghostColor }}>
+                        <span style={{ width: 10, height: 3, background: ghostColor }} />
+                        {ghostCode} {domTally.b}
+                    </span>
+                </div>
+            )}
+
             {!narrow && view === 'map' && drsCount > 0 && (
                 <div style={{
                     position: 'absolute', right: 22, top: L.mapTop + 16, zIndex: 12,

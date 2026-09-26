@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyRotation, rotateFrames } from './rotation';
 import { buildSpeedTrace, buildPedalGeom } from './traces';
+import { dominance, dominanceTally, MINI_SECTORS } from './compare';
 import { buildMapLayout } from './track';
 
 // --- fixtures --------------------------------------------------------------
@@ -242,5 +243,69 @@ describe('buildMapLayout', () => {
             expect(s.t).toBeGreaterThanOrEqual(0);
             expect(s.t).toBeLessThanOrEqual(1);
         });
+    });
+});
+
+
+// --- dominance -------------------------------------------------------------
+
+/** A driver whose elapsed time at lap fraction f is given by a function. */
+const lap = (fn) => ({ timeAtFraction: (f) => fn(f) });
+
+describe('dominance', () => {
+    // 90 seconds flat for one, 92 for the other, both at constant pace.
+    const steady = (total) => lap((f) => f * total);
+
+    it('cuts the lap into mini-sectors that tile it exactly', () => {
+        const secs = dominance(steady(90), steady(92));
+        expect(secs).toHaveLength(MINI_SECTORS);
+        expect(secs[0].from).toBe(0);
+        expect(secs[secs.length - 1].to).toBe(1);
+        for (let i = 1; i < secs.length; i++) {
+            expect(secs[i].from).toBeCloseTo(secs[i - 1].to, 12);
+        }
+    });
+
+    it('gives every sector to the driver who is quicker everywhere', () => {
+        const secs = dominance(steady(90), steady(92));
+        expect(secs.every((s) => s.winner === 'a')).toBe(true);
+        expect(dominanceTally(secs)).toEqual({ a: MINI_SECTORS, b: 0 });
+    });
+
+    it('splits the lap where each driver is actually faster', () => {
+        // A is quicker over the first half, B over the second, and they
+        // finish level — which is the case a single lap time cannot show.
+        const a = lap((f) => (f <= 0.5 ? f * 80 : 40 + (f - 0.5) * 100));
+        const b = lap((f) => (f <= 0.5 ? f * 100 : 50 + (f - 0.5) * 80));
+        const secs = dominance(a, b, 4);
+        expect(secs.map((s) => s.winner)).toEqual(['a', 'a', 'b', 'b']);
+        expect(dominanceTally(secs)).toEqual({ a: 2, b: 2 });
+    });
+
+    it('measures each sector on its own, not on the running total', () => {
+        // B is 5 s down at the line but quicker through the final sector. A
+        // cumulative comparison would hand that sector to A.
+        const a = lap((f) => f * 90);
+        const b = lap((f) => (f < 0.75 ? f * 100 : 75 + (f - 0.75) * 40));
+        const secs = dominance(a, b, 4);
+        expect(secs[3].winner).toBe('b');
+        expect(secs.slice(0, 3).every((s) => s.winner === 'a')).toBe(true);
+    });
+
+    it('reports how much each sector was won by', () => {
+        const secs = dominance(steady(90), steady(92), 2);
+        for (const s of secs) expect(s.gap).toBeCloseTo(1, 9);
+    });
+
+    it('calls a dead heat nobody', () => {
+        const secs = dominance(steady(90), steady(90), 3);
+        expect(secs.every((s) => s.winner === null)).toBe(true);
+        expect(dominanceTally(secs)).toEqual({ a: 0, b: 0 });
+    });
+
+    it('is safe before both laps have loaded', () => {
+        expect(dominance(null, steady(90))).toEqual([]);
+        expect(dominance(steady(90), undefined)).toEqual([]);
+        expect(dominance(steady(90), steady(92), 0)).toEqual([]);
     });
 });

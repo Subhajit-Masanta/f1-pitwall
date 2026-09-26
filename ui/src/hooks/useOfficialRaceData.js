@@ -12,7 +12,7 @@ import { buildGhost } from '../lib/ghost';
 import { applyRotation, rotateFrames } from '../lib/geometry/rotation';
 import { buildMapLayout } from '../lib/geometry/track';
 import { buildSpeedTrace } from '../lib/geometry/traces';
-import { buildCompareTrace } from '../lib/geometry/compare';
+import { buildCompareTrace, dominance } from '../lib/geometry/compare';
 
 /** Turn an axios failure into something a person can read. */
 const friendlyError = (err) => {
@@ -235,7 +235,15 @@ export const useOfficialRaceData = (year, round, session, referenceDriver = null
         [driver, ghost, refLookup, speedTrace],
     );
 
+    // Who was faster through each piece of the lap. Computed here because
+    // this is where both laps are, and it needs nothing else.
+    const dominanceSectors = useMemo(
+        () => (ghost && refLookup ? dominance(refLookup, ghost) : []),
+        [ghost, refLookup],
+    );
+
     return {
+        dominanceSectors,
         trackData,
         mapLayout,
         speedTrace,

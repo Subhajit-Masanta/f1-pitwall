@@ -18,6 +18,7 @@ import CarLayer from './CarLayer';
 
 const TrackCanvas = memo(forwardRef(({
     mapLayout, view = 'map', cars = [], pitBox = null, parkAtStart = true,
+    dominance = null,
 }, ref) => {
     const wrapRef = useRef(null);
     const layerRef = useRef(null);
@@ -90,6 +91,9 @@ const TrackCanvas = memo(forwardRef(({
     const lw = mapSize * 0.0055;          // track line: thin
     const label = mapSize * 0.017;
     const speedView = view === 'speed' && speedSegments?.length > 0;
+    // Who was faster where. Drawn as the road itself rather than as a line on
+    // top of it: the point is to read the circuit, not an annotation of it.
+    const domView = view === 'dominance' && dominance?.length > 0;
 
     const Tick = ({ t, color, text, wide = false }) => !t ? null : (
         <g>
@@ -153,7 +157,7 @@ const TrackCanvas = memo(forwardRef(({
                             glow under a 1.3x bright green line, which made a
                             DRS zone the loudest thing on a head-to-head — ahead
                             of both cars. */}
-                        {drsPaths.map((z, i) => (
+                        {!domView && drsPaths.map((z, i) => (
                             <g key={i}>
                                 <path d={z.d} fill="none" stroke={F1.drs} strokeOpacity="0.10"
                                     strokeWidth={lw * 2.2} strokeLinecap="round" />
@@ -168,6 +172,17 @@ const TrackCanvas = memo(forwardRef(({
                     pit_geometry.py for why an accurate one is invisible. Dashed
                     and dimmer than the track so it reads as a service road
                     rather than a second racing line. */}
+                {domView && (
+                    <g>
+                        {dominance.map((seg, i) => (
+                            <path key={i} d={seg.d} fill="none"
+                                stroke={seg.color} strokeOpacity={seg.winner ? 0.95 : 0.35}
+                                strokeWidth={lw * 1.9}
+                                strokeLinecap="butt" strokeLinejoin="round" />
+                        ))}
+                    </g>
+                )}
+
                 {pitPath && (
                     <g>
                         <path d={pitPath} fill="none" stroke={F1.bg}

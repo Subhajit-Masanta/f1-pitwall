@@ -3,7 +3,7 @@ import {
     buildRace, frameAt, statusAt, orderByLap, lapCrossings, lapAt,
     stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
-    aheadAt, strategyRows, namedStop, STOP_MAX_S,
+    aheadAt, strategyRows, namedStop, STOP_MAX_S, traceRows,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -1106,5 +1106,59 @@ describe('namedStop', () => {
         expect(namedStop(null, false)).toBeNull();
         expect(namedStop(undefined, false)).toBeNull();
         expect(namedStop(0, false)).toBeNull();
+    });
+});
+
+
+describe('traceRows', () => {
+    it('gives every driver their lap-by-lap position', () => {
+        const rows = traceRows(buildRace(payload()));
+        const ver = rows.find((r) => r.code === 'VER');
+        expect(ver.points).toEqual([[1, 1], [2, 2], [3, 1]]);
+    });
+
+    it('stops at the lap it is asked for', () => {
+        // A line that already reaches the flag has told you the result.
+        const ver = traceRows(buildRace(payload()), 2).find((r) => r.code === 'VER');
+        expect(ver.points).toEqual([[1, 1], [2, 2]]);
+        expect(ver.last).toEqual([2, 2]);
+    });
+
+    it('draws the leader last, so their line sits on top', () => {
+        const rows = traceRows(buildRace(payload()));
+        expect(rows[rows.length - 1].code).toBe('VER');   // P1 on lap 3
+    });
+
+    it('lets a line simply stop where the driver did', () => {
+        // Carried along the bottom instead, a retirement draws as a car still
+        // circulating in last place — which is a different thing that also
+        // happens.
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        p.order.push([1, '4', 3], [2, '4', 3]);
+        const nor = traceRows(buildRace(p)).find((r) => r.code === 'NOR');
+        expect(nor.points).toEqual([[1, 3], [2, 3]]);
+        expect(nor.points.some(([lap]) => lap === 3)).toBe(false);
+    });
+
+    it('leaves out a driver who never took a position', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 0, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        expect(traceRows(buildRace(p)).some((r) => r.code === 'NOR')).toBe(false);
+    });
+
+    it('never runs past the race', () => {
+        const r = buildRace(payload());
+        expect(traceRows(r, 999)).toEqual(traceRows(r, r.totalLaps));
+        expect(traceRows(r, 0)).toEqual(traceRows(r, 1));
+    });
+
+    it('returns the laps in order whatever order the payload lists them', () => {
+        const p = payload();
+        p.order = [[3, '1', 1], [1, '1', 1], [2, '1', 2], [1, '16', 2], [2, '16', 1], [3, '16', 2]];
+        const ver = traceRows(buildRace(p)).find((r) => r.code === 'VER');
+        expect(ver.points.map(([lap]) => lap)).toEqual([1, 2, 3]);
     });
 });

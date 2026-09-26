@@ -119,6 +119,27 @@ export const buildMapLayout = (trackData, sectorBoundaries, pitLane = null) => {
         })
         .filter(Boolean);
 
+    /**
+     * The dominance map: one path per mini-sector, keyed by LAP FRACTION.
+     *
+     * Built here rather than in the component because it needs the same `pts`
+     * the track itself is drawn from — a segment of the circuit has to BE a
+     * segment of the circuit, or the colour sits beside the road.
+     *
+     * Returned as a function so the layout is built once and the sectors are
+     * cut when two drivers are actually being compared.
+     */
+    const lapLength = pts[pts.length - 1].d || 1;
+    const sectorPaths = (sectors) => (sectors || []).map((s) => {
+        const from = s.from * lapLength;
+        const to = s.to * lapLength;
+        // One point of overlap at each join, so consecutive sectors meet
+        // instead of leaving a gap of background between them.
+        const seg = pts.filter((p) => p.d >= from && p.d <= to);
+        if (seg.length < 2) return null;
+        return { ...s, d: toPath(seg) };
+    }).filter(Boolean);
+
     // Corner numbers, pushed outward from the track centroid.
     // Corner numbers.
     //
@@ -220,7 +241,7 @@ export const buildMapLayout = (trackData, sectorBoundaries, pitLane = null) => {
     }
 
     return {
-        viewBox, d, pitPath, mapSize, ticks, drsPaths, corners,
+        viewBox, d, pitPath, mapSize, ticks, drsPaths, corners, sectorPaths,
         hasSectors: !!b, speedSegments, speedRange,
     };
 };

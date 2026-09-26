@@ -21,6 +21,7 @@ import { Play, Pause, RotateCcw } from 'lucide-react';
 import TrackCanvas from '../Track/TrackCanvas';
 import TimingTower from './TimingTower';
 import StrategyChart from './StrategyChart';
+import RaceTrace from './RaceTrace';
 import StatusBanner from './StatusBanner';
 import FlagOverlay from './FlagOverlay';
 import StageMessage from '../StageMessage';
@@ -387,9 +388,14 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // whole race at once rather than one moment of it — so it sits underneath
     // in both layouts, reading from the payload the stage already has.
     const strategy = (
-        <div style={{ marginTop: 10 }}>
-            <StrategyChart race={race} lap={lap} narrow={narrow} />
-        </div>
+        <>
+            <div style={{ marginTop: 10 }}>
+                <RaceTrace race={race} lap={lap} narrow={narrow} />
+            </div>
+            <div style={{ marginTop: 10 }}>
+                <StrategyChart race={race} lap={lap} narrow={narrow} />
+            </div>
+        </>
     );
 
     if (!narrow) {

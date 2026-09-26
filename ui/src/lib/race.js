@@ -826,6 +826,50 @@ export const strategyRows = (race, throughLap = race.totalLaps) => {
     return rows;
 };
 
+/**
+ * Every driver's position, lap by lap — the race trace.
+ *
+ * The shape of the whole race in one picture: who climbed, who fell away,
+ * where a safety car shuffled the pack. The strategy chart underneath says
+ * what tyres they did it on, so the two read as one story from either side.
+ *
+ * Like the strategy chart it fills in as the race runs, and for the same
+ * reason. A line that already reaches lap 58 has told you the result.
+ *
+ * A line simply STOPS where a driver does. Carrying it along the bottom would
+ * draw a retirement as a car still circulating in last place, which is a
+ * different thing that also happens.
+ */
+export const traceRows = (race, throughLap = race.totalLaps) => {
+    const total = race.totalLaps || 1;
+    const now = Math.max(1, Math.min(throughLap, total));
+
+    const byNum = new Map();
+    for (const [lap, num, pos] of race.order) {
+        if (lap > now) continue;
+        if (!byNum.has(num)) byNum.set(num, []);
+        byNum.get(num).push([lap, pos]);
+    }
+
+    const rows = [];
+    for (const c of race.cars) {
+        const pts = byNum.get(c.number);
+        if (!pts || pts.length < 1) continue;
+        pts.sort((a, b) => a[0] - b[0]);
+        rows.push({
+            number: c.number,
+            code: c.code,
+            color: c.color,
+            points: pts,
+            last: pts[pts.length - 1],
+        });
+    }
+    // Drawn in reverse order of their current position, so the leader's line
+    // is painted last and stays on top where the eye goes.
+    rows.sort((a, b) => b.last[1] - a.last[1]);
+    return rows;
+};
+
 // --- the starting grid ----------------------------------------------------
 /** How long the grid formation takes to dissolve into the real positions. */
 export const GRID_BLEND_S = 3;
