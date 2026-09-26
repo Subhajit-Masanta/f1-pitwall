@@ -13,6 +13,10 @@
  * Everything animates transform and opacity only, on its own compositor layer,
  * so twenty cars keep their frame budget. `pointer-events: none` throughout —
  * the overlay must never eat a click meant for the map or the scrubber.
+ *
+ * The keyframes block below is the stage's, not only this component's: the
+ * race-control feed slides its newest message in with `pw-rc-in` from here,
+ * because two components each injecting a <style> tag is two <style> tags.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { MONO } from '../../theme';
@@ -53,6 +57,10 @@ const KEYFRAMES = `
 @keyframes pw-flag-pulse {
   0%, 100% { opacity: 0.55; }
   50%      { opacity: 1; }
+}
+@keyframes pw-rc-in {
+  0%   { opacity: 0; transform: translate3d(14px,0,0); }
+  100% { opacity: 1; transform: translate3d(0,0,0); }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-pw-flag] * { animation: none !important; }

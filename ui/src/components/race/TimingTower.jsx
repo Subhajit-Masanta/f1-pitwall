@@ -12,7 +12,10 @@
  */
 import React from 'react';
 import { F1, MONO } from '../../theme';
-import { standingsAt, aheadAt, stintAt, namedStop } from '../../lib/race';
+import {
+    standingsAt, aheadAt, stintAt, namedStop,
+    lapTimeAt, bestLapUpTo, fastestLapUpTo,
+} from '../../lib/race';
 import TyreMark from './TyreMark';
 
 const Tyre = ({ compound }) => <TyreMark compound={compound} size={11} />;
@@ -32,7 +35,17 @@ const fmtGap = (g) => (g == null ? '—' : `+${g.toFixed(3)}`);
 const COLUMNS = [
     ['leader', 'LEADER'],
     ['ahead', 'INTERVAL'],
+    ['last', 'LAST'],
+    ['best', 'BEST'],
 ];
+
+/** m:ss.mmm — a lap time, the way a timing screen writes one. */
+const fmtLap = (t) => {
+    if (t == null) return '—';
+    const m = Math.floor(t / 60);
+    const s = (t - m * 60).toFixed(3).padStart(6, '0');
+    return m ? `${m}:${s}` : s;
+};
 
 const TimingTower = ({ race, lap, second, status, narrow }) => {
     const [column, setColumn] = React.useState('leader');
@@ -83,6 +96,10 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
         [race, second, column],
     );
 
+    // The purple lap, as it stands. Keyed on the LAP, not the second: a lap
+    // time cannot change part way through one.
+    const purple = React.useMemo(() => fastestLapUpTo(race, lap), [race, lap]);
+
     // Retired cars keep their classification but drop to the bottom.
     const order = React.useMemo(
         () => [...live.filter((n) => !retired.has(n)),
@@ -106,10 +123,18 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
     // row blank. It says LEADER either way, which is the one thing about the
     // top of a timing screen nobody should have to work out.
     const cell = (num, i) => {
+        // A lap time belongs to the driver whatever their position, so these
+        // two columns say nothing about the leader being the leader.
+        if (column === 'last') return fmtLap(lapTimeAt(race, num, lap - 1));
+        if (column === 'best') return fmtLap(bestLapUpTo(race, num, lap));
         if (out.has(num)) return 'OUT';
         if (i === 0) return 'LEADER';
         return fmtGap(column === 'ahead' ? ahead?.get(num) : gaps.get(num));
     };
+
+    // Whoever holds the fastest lap of the race so far keeps the purple in
+    // every column, because it is a fact about the driver, not about the view.
+    const isPurple = (num) => purple?.number === num;
 
     if (!order.length) return null;
 
@@ -161,8 +186,13 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                             width: 3, height: 12, background: car.color, flex: '0 0 auto',
                         }} />
                         <span style={{
-                            width: 32, fontWeight: 700, color: F1.text, letterSpacing: 0.4,
-                        }}>{car.code}</span>
+                            width: 32, fontWeight: 700, letterSpacing: 0.4,
+                            color: isPurple(num) ? F1.purple : F1.text,
+                        }}
+                            title={isPurple(num)
+                                ? `Fastest lap: ${fmtLap(purple.time)} on lap ${purple.lap}`
+                                : undefined}
+                        >{car.code}</span>
                         <Tyre compound={stint?.compound} />
                         {pitting.has(num) && (
                             <span style={{
@@ -174,7 +204,9 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
                             </span>
                         )}
                         <span style={{
-                            flex: 1, textAlign: 'right', color: i === 0 ? F1.text : F1.dim,
+                            flex: 1, textAlign: 'right',
+                            color: isPurple(num) && column !== 'leader' && column !== 'ahead'
+                                ? F1.purple : i === 0 ? F1.text : F1.dim,
                             fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
                             fontSize: narrow ? 9 : 10,
                         }}>{cell(num, i)}</span>

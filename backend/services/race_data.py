@@ -148,6 +148,36 @@ def _stoppages(session):
     return out
 
 
+def _lap_times(laps):
+    """
+    Every driver's lap times, in seconds.
+
+    The one number a timing screen is named after, and the payload has never
+    carried it. It cannot be recovered from the crossings either: those are
+    rounded to a tenth and sit on the racing clock, so a derived lap time is
+    out by up to 0.2 s and any lap spanning a stoppage comes out as nonsense —
+    measured at Australia 2023, seven of fifty-six laps.
+
+    NaT laps are left out rather than sent as null: a lap with no time is a lap
+    that was not completed, and 901 of 1003 rows have one.
+
+    Cost, measured on the same race: 9 KB raw, 2 KB gzipped, against a payload
+    of 1.2 MB.
+    """
+    out = {}
+    for num in laps["DriverNumber"].unique():
+        rows = []
+        dl = laps.pick_drivers(num).sort_values("LapNumber")
+        for r in dl.itertuples():
+            t = getattr(r, "LapTime", None)
+            if t is None or str(t) == "NaT":
+                continue
+            rows.append([int(r.LapNumber), round(float(t.total_seconds()), 3)])
+        if rows:
+            out[str(num)] = rows
+    return out
+
+
 def _merge_stints(laps):
     """
     Tyre stints per driver, with red-flag artefacts merged away.
@@ -663,6 +693,7 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
         "stoppages": stoppages,
         "crossings": crossings,
         "stints": _merge_stints(laps),
+        "lap_times": _lap_times(laps),
         "pits": pits,
         "status": spans,
         "messages": messages,

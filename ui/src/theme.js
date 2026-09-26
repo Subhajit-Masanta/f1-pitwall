@@ -46,6 +46,10 @@ export const F1 = {
     // the way a real steering wheel does. Violet exists for that and nothing
     // else — it is the top of a scale, not a palette colour.
     shift: '#B14BE0',
+    // The fastest lap of the race. Purple is not a choice — it is what the
+    // sport has meant by "nobody has gone quicker" for decades, and a timing
+    // screen that picks its own colour for it is simply harder to read.
+    purple: '#B14BE0',
 
     // Sector identity as a VALUE ramp on one neutral. Hue carried no meaning
     // here — S1 was not "more pink" than S2 — so it was pure noise competing

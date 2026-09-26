@@ -24,6 +24,7 @@ import StrategyChart from './StrategyChart';
 import RaceTrace from './RaceTrace';
 import StatusBanner from './StatusBanner';
 import FlagOverlay from './FlagOverlay';
+import RaceControl from './RaceControl';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
@@ -301,6 +302,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 position: 'absolute', left: towerWidth, right: 0,
                 top: narrow ? 96 : 64, bottom: 92,
             }}>
+                {/* race control, over the top-right of the map — where a
+                    circuit's bounding box almost never reaches */}
+                <RaceControl race={race} second={second} narrow={narrow} />
+
                 <TrackCanvas
                     ref={trackRef}
                     mapLayout={mapLayout}

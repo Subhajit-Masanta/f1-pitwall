@@ -60,7 +60,9 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        not two (Melbourne read 5 where the circuit has 4)
 #  v19 — drivers carry their CLASSIFIED finishing position, which the
 #        last lap's Position column does not always agree with
-CACHE_SCHEMA = "v19"
+#  v20 — lap times, which a timing screen is named after and which
+#        cannot be recovered from the crossings
+CACHE_SCHEMA = "v20"
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import {
     stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
     aheadAt, strategyRows, namedStop, STOP_MAX_S, traceRows,
+    lapTimeAt, bestLapUpTo, fastestLapUpTo,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -40,6 +41,10 @@ const payload = () => ({
     stints: {
         '1': [{ compound: 'MEDIUM', from: 1, to: 2, fresh: true },
               { compound: 'HARD', from: 3, to: 3, fresh: true }],
+    },
+    lap_times: {
+        '1': [[1, 92.5], [2, 90.1], [3, 91.8]],
+        '16': [[1, 93.0], [2, 89.4], [3, 90.6]],
     },
     pits: [
         { driver: '1', lap: 2, t: 1.0, window: 25.3, stopped: 4.1, red_flag: false, compound: 'HARD' },
@@ -1160,5 +1165,66 @@ describe('traceRows', () => {
         p.order = [[3, '1', 1], [1, '1', 1], [2, '1', 2], [1, '16', 2], [2, '16', 1], [3, '16', 2]];
         const ver = traceRows(buildRace(p)).find((r) => r.code === 'VER');
         expect(ver.points.map(([lap]) => lap)).toEqual([1, 2, 3]);
+    });
+});
+
+
+describe('lap times', () => {
+    it('reads a driver’s lap straight from the payload', () => {
+        const r = buildRace(payload());
+        expect(lapTimeAt(r, '1', 2)).toBe(90.1);
+        expect(lapTimeAt(r, '16', 3)).toBe(90.6);
+    });
+
+    it('says nothing for a lap that was never completed', () => {
+        const r = buildRace(payload());
+        expect(lapTimeAt(r, '1', 9)).toBeNull();
+        expect(lapTimeAt(r, 'nobody', 1)).toBeNull();
+    });
+
+    it('finds a lap even when a driver missed one', () => {
+        // The index shortcut only works while nobody has skipped a lap.
+        const p = payload();
+        p.lap_times['1'] = [[1, 92.5], [3, 91.8]];
+        const r = buildRace(p);
+        expect(lapTimeAt(r, '1', 3)).toBe(91.8);
+        expect(lapTimeAt(r, '1', 2)).toBeNull();
+    });
+
+    it('gives a best that is only as good as the race so far', () => {
+        // A best-lap column that already knows about lap 3 on lap 1 is
+        // showing the viewer the future.
+        const r = buildRace(payload());
+        expect(bestLapUpTo(r, '1', 1)).toBe(92.5);
+        expect(bestLapUpTo(r, '1', 2)).toBe(90.1);
+        expect(bestLapUpTo(r, '1', 3)).toBe(90.1);
+        expect(bestLapUpTo(r, '1', 0)).toBeNull();
+    });
+
+    it('finds the purple lap of the race so far', () => {
+        const r = buildRace(payload());
+        expect(fastestLapUpTo(r, 1)).toMatchObject({ number: '1', lap: 1, time: 92.5 });
+        // Leclerc goes quicker on lap 2 and takes it.
+        expect(fastestLapUpTo(r, 2)).toMatchObject({ number: '16', lap: 2, time: 89.4 });
+        expect(fastestLapUpTo(r, 3)).toMatchObject({ number: '16', lap: 2, time: 89.4 });
+    });
+
+    it('has no purple lap before anyone completes one', () => {
+        expect(fastestLapUpTo(buildRace(payload()), 0)).toBeNull();
+    });
+
+    it('leaves a shared time with whoever set it first', () => {
+        const p = payload();
+        p.lap_times = { '1': [[2, 90.0]], '16': [[1, 90.0]] };
+        expect(fastestLapUpTo(buildRace(p), 3)).toMatchObject({ number: '16', lap: 1 });
+    });
+
+    it('is safe on a payload with no lap times at all', () => {
+        const p = payload();
+        delete p.lap_times;
+        const r = buildRace(p);
+        expect(lapTimeAt(r, '1', 1)).toBeNull();
+        expect(bestLapUpTo(r, '1', 3)).toBeNull();
+        expect(fastestLapUpTo(r, 3)).toBeNull();
     });
 });

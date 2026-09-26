@@ -8,6 +8,7 @@ import TrackMap from './components/TrackMap';
 import RaceResults from './components/RaceResults';
 import RaceStage from './components/race/RaceStage';
 import FpsMeter from './components/FpsMeter';
+import AudioControls from './components/AudioControls';
 import { F1, MAXW } from './theme';
 import {
   useRoute, navigate, buildPath, MODE_LABEL, RACE_SESSIONS, RACE_DEFAULT,
@@ -70,9 +71,12 @@ function App() {
             <span style={{ fontSize: 12, color: F1.dim, letterSpacing: 1.5, textTransform: 'uppercase' }}>
               {MODE_LABEL[mode]}
             </span>
-            <button onClick={leave} style={backBtn}>
-              <ChevronLeft size={13} /> MODES
-            </button>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AudioControls narrow={narrow} />
+              <button onClick={leave} style={backBtn}>
+                <ChevronLeft size={13} /> MODES
+              </button>
+            </div>
           </>
         )}
       </header>
@@ -148,7 +152,7 @@ function App() {
 }
 
 const backBtn = {
-  marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
+  display: 'flex', alignItems: 'center', gap: 5,
   background: 'transparent', border: `1px solid ${F1.line}`, color: F1.dim,
   padding: '7px 13px', cursor: 'pointer',
   fontSize: 10, fontWeight: 700, letterSpacing: 1.2,

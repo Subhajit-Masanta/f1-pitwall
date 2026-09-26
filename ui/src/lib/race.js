@@ -303,6 +303,7 @@ export const buildRace = (payload) => {
         circuit: payload.circuit,
         // Which race of the weekend this is — a sprint weekend has two.
         session: payload.session,
+        lapTimes: payload.lap_times || {},
         totalLaps: payload.total_laps,
         hz: payload.hz,
         frames,
@@ -716,6 +717,63 @@ export const aheadAt = (race, t) => {
         prev = g;
     }
     return out;
+};
+
+// --- lap times ------------------------------------------------------------
+/**
+ * What a driver's given lap took, in seconds, or null.
+ *
+ * Straight from the payload rather than derived from the crossings: those are
+ * rounded to a tenth and sit on the racing clock, so a derived lap time is out
+ * by up to 0.2 s and any lap spanning a stoppage is nonsense.
+ */
+export const lapTimeAt = (race, num, lap) => {
+    const rows = race.lapTimes?.[num];
+    if (!rows) return null;
+    // Rows are in lap order and a driver rarely misses one, so the obvious
+    // index is almost always right; the scan is for the laps they did miss.
+    const guess = rows[lap - 1];
+    if (guess && guess[0] === lap) return guess[1];
+    for (const [l, t] of rows) if (l === lap) return t;
+    return null;
+};
+
+/**
+ * A driver's best lap SO FAR, or null before they have set one.
+ *
+ * "So far" everywhere in this file means the same thing: the replay is at a
+ * lap, and nothing after it has happened yet. A best-lap column that already
+ * knows about lap 53 on lap 10 is showing the viewer the future.
+ */
+export const bestLapUpTo = (race, num, lap) => {
+    const rows = race.lapTimes?.[num];
+    if (!rows) return null;
+    let best = null;
+    for (const [l, t] of rows) {
+        if (l > lap) break;
+        if (best == null || t < best) best = t;
+    }
+    return best;
+};
+
+/**
+ * The fastest lap of the race so far — the purple one.
+ *
+ * Returns `{ number, lap, time }`, or null while nobody has completed a lap.
+ * Ties go to whoever set it first, which is how the timing screens do it: the
+ * second man to a shared time has not taken anything from the first.
+ */
+export const fastestLapUpTo = (race, lap) => {
+    let best = null;
+    for (const [num, rows] of Object.entries(race.lapTimes || {})) {
+        for (const [l, t] of rows) {
+            if (l > lap) break;
+            if (!best || t < best.time || (t === best.time && l < best.lap)) {
+                best = { number: num, lap: l, time: t };
+            }
+        }
+    }
+    return best;
 };
 
 // --- pit stops ------------------------------------------------------------
