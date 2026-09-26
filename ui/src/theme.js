@@ -93,8 +93,29 @@ export const COMPOUND_LETTER = {
 
 export const MONO = "'Chivo Mono', ui-monospace, 'SF Mono', Menlo, monospace";
 
-/** shared page width so content doesn't stretch on wide monitors */
-export const MAXW = 1200;
+/**
+ * How wide the page is allowed to get.
+ *
+ * 1200 was a reading measure, and almost nothing here is reading: the stage is
+ * a map, a timing tower and two charts, and every one of them is better with
+ * more room. The map especially — at 1200 the track is WIDTH-bound, so on a
+ * 1080p screen it was drawing at about two thirds of the height it had
+ * available while 700px of desk sat empty either side.
+ *
+ * The cap is high enough that most screens never reach it: at 1920 the page
+ * is fluid and only a 2200-wide desktop is held back. Past that the stage
+ * stops growing usefully anyway, because its height — bounded by the viewport
+ * — becomes what limits the circuit rather than the width does.
+ */
+export const MAXW = 2200;
+
+/**
+ * ...except the mode picker, which IS a reading measure.
+ *
+ * Three cards across 1680px are 540px each with two lines of text in them,
+ * which reads as a website that has run out of things to say.
+ */
+export const MAXW_TEXT = 1120;
 
 /** 90.4 -> "1:30.400" */
 export const fmtLap = (t) => {

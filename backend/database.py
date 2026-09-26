@@ -90,6 +90,22 @@ def cache_get(key: str):
         return None
 
 
+def _drop_older(key: str):
+    """Remove other schema generations of the same logical key."""
+    import re
+    m = re.match(r"^([a-z]+):v\d+:(.*)$", key)
+    if not m or _cache is None:
+        return
+    kind, rest = m.group(1), m.group(2)
+    try:
+        _cache.delete_many({
+            "_id": {"$regex": f"^{re.escape(kind)}:v[0-9]+:{re.escape(rest)}$",
+                    "$ne": key},
+        })
+    except Exception as e:
+        print(f"[WARN] pruning older generations of {key} failed: {e}")
+
+
 def cache_set(key: str, payload: dict):
     """Store `payload` gzipped. Best-effort — failures never break a request."""
     if not CACHE_ENABLED:
@@ -113,8 +129,50 @@ def cache_set(key: str, payload: dict):
             upsert=True,
         )
         print(f"[CACHE] stored {key} ({len(blob)/1024:.0f} KB gz, from {len(raw)/1024:.0f} KB)")
+        # The same payload from an older schema is now dead weight. Dropping
+        # it here is what stops every bump leaving a whole generation behind:
+        # `race:v19:2023:3:R` goes when `race:v20:2023:3:R` arrives.
+        _drop_older(key)
     except Exception as e:
         print(f"[WARN] cache_set({key}) failed: {e}")
+
+
+def cache_drop_stale(current_schema: str, dry_run: bool = True):
+    """
+    Delete cache documents from a superseded schema.
+
+    Every key carries the schema it was built with — `race:v20:2023:3:R` — so a
+    bump does not overwrite the old document, it writes a new one beside it and
+    the old one is never read again. Measured before the first prune: 1,167
+    documents, of which about 1,100 were generations v2 to v19, and a race
+    payload is 1.2 MB.
+
+    Nothing reads a stale key by construction, so this is safe; `dry_run` is
+    the default anyway, because it is someone's live cache.
+
+    Returns (kept, removed, bytes_freed).
+    """
+    _connect()
+    if _cache is None:
+        return (0, 0, 0)
+    import re
+    pattern = re.compile(r"^[a-z]+:(v\d+):")
+    kept = removed = freed = 0
+    stale = []
+    for doc in _cache.find({}, {"_id": 1, "gz_bytes": 1}):
+        m = pattern.match(str(doc["_id"]))
+        # A key with no schema in it predates the scheme entirely, so it can
+        # never be read either.
+        if m and m.group(1) == current_schema:
+            kept += 1
+            continue
+        removed += 1
+        freed += int(doc.get("gz_bytes") or 0)
+        stale.append(doc["_id"])
+    if not dry_run and stale:
+        for i in range(0, len(stale), 500):
+            _cache.delete_many({"_id": {"$in": stale[i:i + 500]}})
+    return (kept, removed, freed)
 
 
 def cache_stats():

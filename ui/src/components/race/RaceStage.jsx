@@ -25,6 +25,8 @@ import RaceTrace from './RaceTrace';
 import StatusBanner from './StatusBanner';
 import FlagOverlay from './FlagOverlay';
 import RaceControl from './RaceControl';
+import LapScrubber from './LapScrubber';
+import RaceCard from './RaceCard';
 import StageMessage from '../StageMessage';
 import { useClock } from '../../playback/useClock';
 import { useIsNarrow } from '../../hooks/useResponsive';
@@ -35,7 +37,7 @@ import {
     buildRace, carAt, statusAt, lapAt, messagesUpTo, weatherAt,
     standingsAt, safetyCarAt, gridSlots, GRID_BLEND_S,
 } from '../../lib/race';
-import { F1, MONO } from '../../theme';
+import { F1, MONO, MAXW } from '../../theme';
 
 const SPEEDS = [1, 2, 5, 10];
 
@@ -45,6 +47,9 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [speed, setSpeed] = useState(10);
+    // The card greets the race once. Pressing play is the only thing that
+    // dismisses it, and nothing brings it back for this session.
+    const [greeted, setGreeted] = useState(false);
 
     // Per-lap state: the tower and the banner only change on a crossing, so
     // these are the only things that re-render during playback.
@@ -123,7 +128,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 const g = grid.get(c.number);
                 if (g) { x = g.x + (p.x - g.x) * gk; y = g.y + (p.y - g.y) * gk; }
             }
-            trackRef.current?.move(c.number, x, -y);
+            // `pit` rides along so the marker can shrink: a car being
+            // serviced is not racing, and eighteen of them in a pit lane that
+            // is 55px long need all the room they can be given.
+            trackRef.current?.move(c.number, x, -y, p.pit);
         }
 
         setSecond((prev) => {
@@ -211,7 +219,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
     // what an arrow moves — dragging a scrubber 1/58th of its width to see the
     // next lap is not a control, it is a dare.
     useKeyboard(useMemo(() => ({
-        toggle: () => (clock.isPlaying ? clock.pause() : clock.play()),
+        toggle: () => {
+            setGreeted(true);
+            if (clock.isPlaying) clock.pause(); else clock.play();
+        },
         prev: () => scrubTo(Math.max(1, lap - 1)),
         next: () => scrubTo(Math.min(race?.totalLaps ?? 1, lap + 1)),
         restart: () => scrubTo(1),
@@ -225,10 +236,40 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
 
     const towerWidth = narrow ? 0 : 232;
 
+    // THE STAGE IS AS TALL AS THE CIRCUIT NEEDS IT TO BE.
+    //
+    // A fixed 80vh was fine while the page was 1200px wide, because the map
+    // band came out at roughly the shape of a circuit. Widening the page to
+    // 1680 made it 2.8:1 against Melbourne's 2.0:1, so the track went
+    // height-bound and drew at 771px inside a 1366px box — 600px of dead
+    // stage either side of it.
+    //
+    // So the height is derived instead: whatever makes the map band the same
+    // shape as the track it has to draw, bounded above by the viewport and
+    // below by the old minimum.
+    //
+    // The upper bound is 82vh rather than the whole of it because the page
+    // header and the race picker sit above the stage: at 86 the scrubber —
+    // the control this mode is actually driven by — landed four pixels under
+    // the fold.
+    //
+    // All of it in CSS, because the only unknown is the stage width and that
+    // is the page width, which is known: min(MAXW, 100vw - the page padding).
+    const MAP_TOP = narrow ? 96 : 64;
+    const MAP_BOTTOM = 92;
+    const aspect = (() => {
+        const [, , w, h] = (mapLayout?.viewBox || '0 0 1 1').split(' ').map(Number);
+        return w > 0 && h > 0 ? w / h : 1.8;
+    })();
+    const pagePad = narrow ? 32 : 80;
+    const stageW = `min(${MAXW}px, 100vw - ${pagePad}px)`;
+    const mapW = `(${stageW} - ${towerWidth}px)`;
+    const wanted = `calc(${mapW} / ${aspect.toFixed(3)} + ${MAP_TOP + MAP_BOTTOM}px)`;
+
     const stage = (
         <div style={{
             position: 'relative', width: '100%',
-            height: `calc(${narrow ? 74 : 80}vh)`,
+            height: `min(${wanted}, ${narrow ? 74 : 82}vh)`,
             minHeight: narrow ? 520 : 580,
             background: `radial-gradient(120% 80% at 58% 46%, #15151C 0%, ${F1.bg} 62%)`,
             border: `1px solid ${F1.line}`,
@@ -300,7 +341,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
             {/* map */}
             <div style={{
                 position: 'absolute', left: towerWidth, right: 0,
-                top: narrow ? 96 : 64, bottom: 92,
+                top: MAP_TOP, bottom: MAP_BOTTOM,
             }}>
                 {/* race control, over the top-right of the map — where a
                     circuit's bounding box almost never reaches */}
@@ -321,6 +362,13 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                 announcement reads, below the transport so controls stay live. */}
             <FlagOverlay span={status} />
 
+            {!greeted && (
+                <RaceCard
+                    race={race} byNumber={race.byNumber} narrow={narrow}
+                    onStart={() => { setGreeted(true); clock.play(); }}
+                />
+            )}
+
             {/* transport + lap scrubber */}
             <div style={{
                 position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 13,
@@ -330,7 +378,10 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <button
-                        onClick={clock.isPlaying ? clock.pause : clock.play}
+                        onClick={() => {
+                            setGreeted(true);
+                            if (clock.isPlaying) clock.pause(); else clock.play();
+                        }}
                         style={{
                             display: 'flex', alignItems: 'center', gap: 8,
                             background: F1.red, color: '#fff', border: 'none',
@@ -368,23 +419,7 @@ const RaceStage = ({ year, round, session = 'R', raceName }) => {
                     control: a 153-minute race still takes 15 minutes at 10x,
                     so moving by lap is how anyone actually watches this.
                 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{
-                        fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: F1.faint,
-                    }}>LAP 1</span>
-                    <input
-                        type="range"
-                        min={1}
-                        max={race.totalLaps}
-                        value={lap}
-                        onChange={(e) => scrubTo(Number(e.target.value))}
-                        aria-label="Jump to lap"
-                        style={{ flex: 1, accentColor: F1.red, cursor: 'pointer' }}
-                    />
-                    <span style={{
-                        fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: F1.faint,
-                    }}>{race.totalLaps}</span>
-                </div>
+                <LapScrubber race={race} lap={lap} onScrub={scrubTo} />
             </div>
         </div>
     );

@@ -96,9 +96,16 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
         [race, second, column],
     );
 
-    // The purple lap, as it stands. Keyed on the LAP, not the second: a lap
-    // time cannot change part way through one.
-    const purple = React.useMemo(() => fastestLapUpTo(race, lap), [race, lap]);
+    // The purple lap, as it stands.
+    //
+    // `lap` is the lap being RUN, so the laps that have been completed are 1
+    // to lap-1. Asking for `lap` handed out a purple on lap one, for a lap
+    // nobody had finished yet.
+    //
+    // Keyed on the lap, not the second: a lap time cannot change part way
+    // through one.
+    const done = lap - 1;
+    const purple = React.useMemo(() => fastestLapUpTo(race, lap - 1), [race, lap]);
 
     // Retired cars keep their classification but drop to the bottom.
     const order = React.useMemo(
@@ -125,8 +132,8 @@ const TimingTower = ({ race, lap, second, status, narrow }) => {
     const cell = (num, i) => {
         // A lap time belongs to the driver whatever their position, so these
         // two columns say nothing about the leader being the leader.
-        if (column === 'last') return fmtLap(lapTimeAt(race, num, lap - 1));
-        if (column === 'best') return fmtLap(bestLapUpTo(race, num, lap));
+        if (column === 'last') return fmtLap(lapTimeAt(race, num, done));
+        if (column === 'best') return fmtLap(bestLapUpTo(race, num, done));
         if (out.has(num)) return 'OUT';
         if (i === 0) return 'LEADER';
         return fmtGap(column === 'ahead' ? ahead?.get(num) : gaps.get(num));

@@ -42,14 +42,14 @@ const TrackCanvas = memo(forwardRef(({
     }, [mapLayout]);
 
     /** Move a car, in TRACK units. The projection to pixels happens here. */
-    const move = useCallback((id, x, y) => {
+    const move = useCallback((id, x, y, inPit = false) => {
         if (x == null || !Number.isFinite(x) || !Number.isFinite(y)) {
             layerRef.current?.hide(id);
             return;
         }
         const { scale, offX, offY } = proj.current;
         lastPos.current[id] = { x, y };
-        layerRef.current?.place(id, x * scale + offX, y * scale + offY);
+        layerRef.current?.place(id, x * scale + offX, y * scale + offY, inPit);
     }, []);
 
     useImperativeHandle(ref, () => ({ move }), [move]);

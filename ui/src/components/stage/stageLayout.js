@@ -30,6 +30,8 @@
  * @param hasSectorRow    the two-driver sector row is showing
  * @param hasDeltaPanel   the delta readout panel is showing
  * @param headerH         MEASURED height of the stage header, in px
+ * @param aspect          width/height of the circuit being drawn
+ * @param maxw            the page's width cap, in px
  */
 export const stageLayout = ({
     narrow,
@@ -40,6 +42,8 @@ export const stageLayout = ({
     showDeltaTrace = false,
     hasSectorRow = false,
     hasDeltaPanel = false,
+    aspect = 0,
+    maxw = 1680,
 }) => {
     // --- band heights ------------------------------------------------------
     const hudSpace = narrow ? 180 : 150;
@@ -103,13 +107,39 @@ export const stageLayout = ({
     const mapH = narrow ? 68 : 78;
     const grown = traceBlock + transportSpace + deltaSpace + headerExtra;
 
+    // THE STAGE IS AS TALL AS THE CIRCUIT NEEDS IT TO BE.
+    //
+    // A fixed share of the viewport was fine while the page was 1200px wide,
+    // because the map band came out roughly the shape of a circuit. On a wider
+    // page it does not: measured at 1745px, Melbourne drew 683px wide inside a
+    // 1374px band — half the stage empty either side of the track.
+    //
+    // So the height is derived from the shape of the thing being drawn. All in
+    // CSS, because the only unknown is the stage width and that is the page
+    // width: min(maxw, 100vw - the page padding).
+    //
+    //   floor   what it used to be, so nothing ever gets shorter
+    //   wanted  the height that makes the map band the circuit's own shape
+    //   cap     as tall as it can be with the transport still on screen.
+    //           76, not 85: the page header and the race picker sit above the
+    //           stage, and at 85 the START LAP button landed three pixels
+    //           under the fold — you had to scroll to begin.
+    const pagePad = narrow ? 32 : 80;
+    const floor = `calc(${mapH}vh + ${grown}px)`;
+    const height = aspect > 0
+        ? `clamp(${floor},`
+          + ` calc((min(${maxw}px, 100vw - ${pagePad}px) - ${timingSpace}px)`
+          + ` / ${aspect.toFixed(3)} + ${mapTop + mapBottom}px),`
+          + ` calc(76vh + ${bottomSpace}px))`
+        : floor;
+
     return {
         hudSpace, traceH, pedalH, deltaH, labelRow, sectorRow, sectorGap,
         traceBlock, bottomSpace, transportSpace, timingSpace, deltaSpace,
         headerBase, headerExtra, mapTop, mapBottom,
         stage: {
             position: 'relative', width: '100%',
-            height: `calc(${mapH}vh + ${grown}px)`,
+            height,
             minHeight: (narrow ? 440 : 520) + grown,
             overflow: 'hidden', display: 'flex',
         },

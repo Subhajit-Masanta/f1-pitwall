@@ -7,7 +7,7 @@
  * numerals, one accent.
  */
 import { ArrowRight } from 'lucide-react';
-import { F1, MONO } from '../theme';
+import { F1, MONO, MAXW_TEXT } from '../theme';
 
 const MODES = [
     {
@@ -87,7 +87,7 @@ const Card = ({ mode, onPick }) => {
 };
 
 const Landing = ({ onPick }) => (
-    <div>
+    <div style={{ maxWidth: MAXW_TEXT }}>
         <div style={{
             fontSize: 11, fontWeight: 700, letterSpacing: 1.6, color: F1.dim,
             paddingBottom: 14, borderBottom: `1px solid ${F1.line}`, marginBottom: 22,

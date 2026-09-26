@@ -928,6 +928,102 @@ export const traceRows = (race, throughLap = race.totalLaps) => {
     return rows;
 };
 
+// --- the race, as a timeline ----------------------------------------------
+/**
+ * Everything that happened, placed on the lap it happened on.
+ *
+ * For the scrubber. A bar marked 1 to 58 says nothing about the race it is
+ * scrubbing: finding the restart means dragging and reading the clock until
+ * you overshoot it. Marked up, "take me to the restart" is a glance — and
+ * every one of these is already in the payload.
+ *
+ * Bands (safety car, red flag) carry a lap range; marks (a stop, the fastest
+ * lap) carry one lap. Everything is in LAPS, because that is what the
+ * scrubber is measured in.
+ */
+const BAND_CODES = { 4: 'sc', 6: 'vsc', 5: 'red' };
+
+export const raceEvents = (race) => {
+    const total = race.totalLaps || 1;
+    const clamp = (l) => Math.max(1, Math.min(total, l));
+
+    // Periods the race was neutralised or stopped.
+    const bands = [];
+    for (const sp of race.status || []) {
+        const kind = BAND_CODES[Number(sp.code)];
+        if (!kind) continue;
+        const from = clamp(lapAt(race, sp.start));
+        const to = clamp(lapAt(race, sp.end));
+        // A span shorter than a lap still gets a lap of width, or it cannot
+        // be seen or clicked.
+        bands.push({ kind, from, to: Math.max(to, from) });
+    }
+
+    // Pit stops, one mark each. Not aggregated: the SHAPE of a pit window —
+    // half the field stopping within three laps — is the thing worth seeing,
+    // and that only reads if every stop is drawn.
+    const stops = (race.pits || [])
+        .filter((p) => p.lap >= 1 && !p.red_flag)
+        .map((p) => ({ kind: 'stop', lap: clamp(p.lap) }));
+
+    // The purple lap.
+    const quick = fastestLapUpTo(race, total);
+
+    return {
+        bands,
+        stops,
+        fastest: quick ? { kind: 'fastest', lap: clamp(quick.lap), ...quick } : null,
+    };
+};
+
+/**
+ * One line of "what happened on this lap", for the scrubber's tooltip.
+ *
+ * Bands win over marks: a driver stopping under a safety car is stopping
+ * BECAUSE of the safety car, and that is the useful half of the sentence.
+ */
+const BAND_LABEL = { sc: 'Safety car', vsc: 'Virtual safety car', red: 'Red flag' };
+
+export const eventsAtLap = (events, lap) => {
+    const out = [];
+    for (const b of events.bands || []) {
+        if (lap >= b.from && lap <= b.to) out.push(BAND_LABEL[b.kind]);
+    }
+    if (events.fastest && events.fastest.lap === lap) out.push('Fastest lap');
+    const n = (events.stops || []).filter((s) => s.lap === lap).length;
+    if (n) out.push(n === 1 ? '1 pit stop' : `${n} pit stops`);
+    return out;
+};
+
+/**
+ * The race in six numbers — what you are about to watch.
+ *
+ * Every one of them is already in the payload; none of it needed asking for.
+ * It exists because the moment a race finishes loading you are looking at
+ * twenty dots on a grid with nothing to tell you whether this is the one with
+ * three red flags or a procession, and that is the question you had when you
+ * picked it.
+ *
+ * `leaders` is the count of drivers who led a lap, which is the cheapest
+ * single measure of whether a race was a contest.
+ */
+export const raceSummary = (race) => {
+    const ev = raceEvents(race);
+    const classified = (c) => /finish|lap/i.test(c.status || '');
+    return {
+        laps: race.totalLaps || 0,
+        redFlags: (race.redSpans || []).length,
+        safetyCars: ev.bands.filter((b) => b.kind === 'sc').length,
+        vsc: ev.bands.filter((b) => b.kind === 'vsc').length,
+        retirements: race.cars.filter((c) => !classified(c)).length,
+        leaders: new Set((race.order || [])
+            .filter(([, , pos]) => pos === 1)
+            .map(([, num]) => num)).size,
+        stops: ev.stops.length,
+        fastest: ev.fastest,
+    };
+};
+
 // --- the starting grid ----------------------------------------------------
 /** How long the grid formation takes to dissolve into the real positions. */
 export const GRID_BLEND_S = 3;

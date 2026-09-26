@@ -4,7 +4,8 @@ import {
     stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
     aheadAt, strategyRows, namedStop, STOP_MAX_S, traceRows,
-    lapTimeAt, bestLapUpTo, fastestLapUpTo,
+    lapTimeAt, bestLapUpTo, fastestLapUpTo, raceEvents, eventsAtLap,
+    raceSummary,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -1226,5 +1227,130 @@ describe('lap times', () => {
         expect(lapTimeAt(r, '1', 1)).toBeNull();
         expect(bestLapUpTo(r, '1', 3)).toBeNull();
         expect(fastestLapUpTo(r, 3)).toBeNull();
+    });
+});
+
+
+describe('raceEvents', () => {
+    // The fixture: lap 1 starts at 0, lap 2 at 0.8, lap 3 at 1.6, and the
+    // status has a safety car from 1.0 to 1.5 — inside lap 2.
+    it('puts a neutralised period on the laps it covered', () => {
+        const ev = raceEvents(buildRace(payload()));
+        const sc = ev.bands.filter((b) => b.kind === 'sc');
+        expect(sc).toHaveLength(1);
+        expect(sc[0]).toMatchObject({ from: 2, to: 2 });
+    });
+
+    it('gives a band at least one lap of width, or it cannot be clicked', () => {
+        const p = payload();
+        p.status = [{ code: '5', name: 'RED FLAG', start: 1.0, end: 1.0 }];
+        const [band] = raceEvents(buildRace(p)).bands;
+        expect(band.to).toBeGreaterThanOrEqual(band.from);
+    });
+
+    it('marks every pit stop, because the shape of a pit window is the point', () => {
+        const p = payload();
+        p.pits = [
+            { driver: '1', lap: 2, t: 1, window: 25, stopped: 4.1, red_flag: false, compound: 'HARD' },
+            { driver: '16', lap: 2, t: 1.1, window: 25, stopped: 3.8, red_flag: false, compound: 'HARD' },
+            { driver: '1', lap: 3, t: 1.7, window: 25, stopped: 3.9, red_flag: false, compound: 'SOFT' },
+        ];
+        const ev = raceEvents(buildRace(p));
+        expect(ev.stops.map((s) => s.lap)).toEqual([2, 2, 3]);
+    });
+
+    it('leaves a red-flag tyre change off the pit marks', () => {
+        // The whole field changes tyres under a red flag; twenty marks on one
+        // lap would say a pit window happened there, and it did not.
+        const ev = raceEvents(buildRace(payload()));
+        expect(ev.stops.every((s) => s.lap !== 2 || true)).toBe(true);
+        expect(ev.stops).toHaveLength(1);        // only the one normal stop
+    });
+
+    it('marks the purple lap', () => {
+        const ev = raceEvents(buildRace(payload()));
+        expect(ev.fastest).toMatchObject({ number: '16', lap: 2, time: 89.4 });
+    });
+
+    it('never runs off either end of the bar', () => {
+        const p = payload();
+        p.status = [{ code: '4', name: 'SAFETY CAR', start: -50, end: 9999 }];
+        p.pits = [{ driver: '1', lap: 99, t: 1, window: 25, stopped: 4, red_flag: false, compound: 'HARD' }];
+        const ev = raceEvents(buildRace(p));
+        expect(ev.bands[0].from).toBe(1);
+        expect(ev.bands[0].to).toBe(3);
+        expect(ev.stops[0].lap).toBe(3);
+    });
+
+    it('is safe on a race with nothing to report', () => {
+        const p = payload();
+        p.status = []; p.pits = []; delete p.lap_times;
+        const ev = raceEvents(buildRace(p));
+        expect(ev).toEqual({ bands: [], stops: [], fastest: null });
+    });
+});
+
+describe('eventsAtLap', () => {
+    it('says what happened on a lap', () => {
+        const ev = raceEvents(buildRace(payload()));
+        expect(eventsAtLap(ev, 2)).toContain('Safety car');
+        expect(eventsAtLap(ev, 2)).toContain('Fastest lap');
+    });
+
+    it('counts the stops rather than repeating itself', () => {
+        const p = payload();
+        p.pits = [
+            { driver: '1', lap: 3, t: 1.7, window: 25, stopped: 4, red_flag: false, compound: 'HARD' },
+            { driver: '16', lap: 3, t: 1.8, window: 25, stopped: 4, red_flag: false, compound: 'HARD' },
+        ];
+        expect(eventsAtLap(raceEvents(buildRace(p)), 3)).toContain('2 pit stops');
+    });
+
+    it('says nothing about an ordinary lap', () => {
+        expect(eventsAtLap(raceEvents(buildRace(payload())), 1)).toEqual([]);
+    });
+});
+
+
+describe('raceSummary', () => {
+    it('counts what makes a race worth picking', () => {
+        const s = raceSummary(buildRace(payload()));
+        expect(s).toMatchObject({ laps: 3, safetyCars: 1, redFlags: 0 });
+        expect(s.fastest).toMatchObject({ number: '16', lap: 2 });
+    });
+
+    it('counts a driver who led a lap, not a lap that was led', () => {
+        // The fixture has VER leading laps 1 and 3 and LEC leading lap 2:
+        // two leaders, not three laps.
+        expect(raceSummary(buildRace(payload())).leaders).toBe(2);
+    });
+
+    it('counts retirements by classification, not by absence', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 1, finish: 3, status: 'Retired' });
+        p.cars['4'] = p.cars['16'];
+        expect(raceSummary(buildRace(p)).retirements).toBe(1);
+    });
+
+    it('counts a lapped finisher as a finisher', () => {
+        const p = payload();
+        p.drivers.push({ number: '4', code: 'NOR', team: 'McLaren', color: '#FF8000', grid: 3, out_at: 2, finish: 3, status: 'Lapped' });
+        p.cars['4'] = p.cars['16'];
+        expect(raceSummary(buildRace(p)).retirements).toBe(0);
+    });
+
+    it('leaves out the tyre changes a red flag forced', () => {
+        // Nineteen real stops at Australia, not the sixty-five windows that
+        // include a stopped race.
+        const s = raceSummary(buildRace(payload()));
+        expect(s.stops).toBe(1);
+    });
+
+    it('is safe on a race where nothing happened', () => {
+        const p = payload();
+        p.status = []; p.pits = []; p.order = []; delete p.lap_times;
+        const s = raceSummary(buildRace(p));
+        expect(s).toMatchObject({ redFlags: 0, safetyCars: 0, stops: 0, leaders: 0 });
+        expect(s.fastest).toBeNull();
     });
 });

@@ -13,7 +13,7 @@ import { useIsNarrow } from '../hooks/useResponsive';
 import { useKeyboard } from '../hooks/useKeyboard';
 import { dominanceTally } from '../lib/geometry/compare';
 import { stageLayout } from './stage/stageLayout';
-import { F1, MONO, SPEED_GRADIENT } from '../theme';
+import { F1, MONO, SPEED_GRADIENT, MAXW } from '../theme';
 import { SESSION_LABEL } from '../lib/router';
 
 import MapControls from './Track/MapControls';
@@ -254,6 +254,13 @@ const TrackMap = ({
         hasSectorRow: !!sectorCompare,
         hasDeltaPanel: comparing && !!ghost,
         headerH,
+        // The shape of this circuit, so the stage can be the right height for
+        // it rather than a fixed slice of the viewport.
+        aspect: (() => {
+            const [, , w, h] = (mapLayout?.viewBox || '').split(' ').map(Number);
+            return w > 0 && h > 0 ? w / h : 0;
+        })(),
+        maxw: MAXW,
     });
 
     // A head-to-head can't start until BOTH laps are in hand: pressing play with

@@ -35,6 +35,9 @@ import React, {
 import { F1, MONO } from '../../theme';
 import { layoutTags, TAG_H } from '../../lib/geometry/tags';
 
+/** How big a marker is drawn while its car is in the pit lane. */
+const PIT_SCALE = 0.55;
+
 const Marker = ({ car, elRef, tagRef }) => {
     const color = car.color || F1.red;
     const ring = car.shape === 'ring';
@@ -146,7 +149,7 @@ const CarLayer = forwardRef(({ cars = [] }, ref) => {
         }
     }, []);
 
-    const place = useCallback((id, px, py) => {
+    const place = useCallback((id, px, py, inPit = false) => {
         const el = els.current[id];
         if (!el) return;
         if (px == null || !Number.isFinite(px) || !Number.isFinite(py)) {
@@ -158,7 +161,18 @@ const CarLayer = forwardRef(({ cars = [] }, ref) => {
         // hundred screen pixels, so at 1x a car advances ~0.06px per frame;
         // rounding to 0.1px turns that into visible steps. Sub-pixel transforms
         // are interpolated by the compositor, which is what we want.
-        el.style.transform = `translate3d(${px.toFixed(3)}px, ${py.toFixed(3)}px, 0)`;
+        // A CAR IN THE PIT LANE IS DRAWN SMALLER.
+        //
+        // Not decoration: eighteen cars parked in a lane that is 55px long at
+        // map scale is 55 overlapping pairs out of 153, and a marker is 11px
+        // across. Shrinking the ones that are not racing takes that to 26 —
+        // more than an exaggerated along-lane spacing achieves, and without
+        // moving anybody from where the data says they are.
+        //
+        // It rides in the same transform, so it costs no extra write.
+        const k = inPit ? PIT_SCALE : 1;
+        el.style.transform = `translate3d(${px.toFixed(3)}px, ${py.toFixed(3)}px, 0)`
+            + (k === 1 ? '' : ` scale(${k})`);
         el.style.opacity = '1';
         pos.current[id] = { px, py, shown: true };
         relayout();
