@@ -66,7 +66,9 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 #        is a difference between two of them, so rounding them to a tenth
 #        was the accuracy of the whole tower: Hamilton's finishing gap at
 #        Australia came out +0.3 against an official +0.179
-CACHE_SCHEMA = "v21"
+#  v22 — sector times, which are what a timing screen is coloured by and
+#        cannot be derived from the lap times or the crossings
+CACHE_SCHEMA = "v22"
 
 
 # ---------------------------------------------------------------------------

@@ -179,6 +179,43 @@ def _lap_times(laps):
     return out
 
 
+def _sector_times(laps):
+    """
+    Every driver's three sector times per lap, in seconds.
+
+    The colours on a timing screen are the point of this: a sector is PURPLE
+    when it is the fastest anyone has gone through it, GREEN when it is the
+    driver's own best, and plain otherwise. None of that can be derived from
+    anything the payload already carries — lap times give the total, and the
+    crossings give when a sector ENDED rather than how long it took.
+
+    Durations, not session times, so unlike the crossings these are untouched
+    by the racing clock: a sector is the same length whether or not the race
+    was stopped an hour earlier.
+
+    A lap with no sectors at all is left out; a lap missing one of the three
+    keeps the two it has, because a driver who was shown a red flag in sector
+    three still set sectors one and two.
+    """
+    out = {}
+    for num in laps["DriverNumber"].unique():
+        rows = []
+        dl = laps.pick_drivers(num).sort_values("LapNumber")
+        for r in dl.itertuples():
+            trio = []
+            for i in (1, 2, 3):
+                v = getattr(r, f"Sector{i}Time", None)
+                trio.append(
+                    None if v is None or str(v) == "NaT"
+                    else round(float(v.total_seconds()), 3)
+                )
+            if any(t is not None for t in trio):
+                rows.append([int(r.LapNumber), *trio])
+        if rows:
+            out[str(num)] = rows
+    return out
+
+
 def _merge_stints(laps):
     """
     Tyre stints per driver, with red-flag artefacts merged away.
@@ -710,6 +747,7 @@ def get_race_data(year: int, race_round: int, session_type: str = "R"):
         "crossings": crossings,
         "stints": _merge_stints(laps),
         "lap_times": _lap_times(laps),
+        "sectors": _sector_times(laps),
         "pits": pits,
         "status": spans,
         "messages": messages,

@@ -304,6 +304,7 @@ export const buildRace = (payload) => {
         // Which race of the weekend this is — a sprint weekend has two.
         session: payload.session,
         lapTimes: payload.lap_times || {},
+        sectors: payload.sectors || {},
         totalLaps: payload.total_laps,
         hz: payload.hz,
         frames,
@@ -774,6 +775,89 @@ export const fastestLapUpTo = (race, lap) => {
         }
     }
     return best;
+};
+
+// --- sectors --------------------------------------------------------------
+/**
+ * A driver's three sector times on a given lap, or null.
+ *
+ * Any of the three can be null on its own: a driver shown a red flag in
+ * sector three still set sectors one and two, and nobody sets a sector one on
+ * lap one because that lap starts from a standing grid. Measured at Australia
+ * 2023, 86 of 995 lap rows are missing at least one.
+ */
+export const sectorsAt = (race, num, lap) => {
+    const rows = race.sectors?.[num];
+    if (!rows) return null;
+    // Rows are lap-ordered and a driver rarely misses one, so the obvious
+    // index is almost always right; the scan is for the laps they did miss.
+    const guess = rows[lap - 1];
+    if (guess && guess[0] === lap) return guess.slice(1);
+    for (const r of rows) if (r[0] === lap) return r.slice(1);
+    return null;
+};
+
+/**
+ * The best each sector has been SO FAR: the session's, and each driver's own.
+ *
+ * "So far" is the rule the whole file keeps — the replay is at a lap and
+ * nothing after it has happened yet. A purple sector that already knows about
+ * lap 53 on lap 10 is showing the viewer the future.
+ *
+ * Both halves come from one pass, because they are the same scan and because
+ * a driver's own best can never be faster than the session's; computing them
+ * apart invites the two to disagree.
+ */
+export const sectorBestsUpTo = (race, lap) => {
+    const session = [null, null, null];
+    const own = new Map();
+    for (const [num, rows] of Object.entries(race.sectors || {})) {
+        const mine = [null, null, null];
+        for (const row of rows) {
+            if (row[0] > lap) break;
+            for (let i = 0; i < 3; i++) {
+                const t = row[i + 1];
+                if (t == null) continue;
+                if (mine[i] == null || t < mine[i]) mine[i] = t;
+                if (session[i] == null || t < session[i]) session[i] = t;
+            }
+        }
+        own.set(num, mine);
+    }
+    return { session, own };
+};
+
+/**
+ * How a sector time should be coloured.
+ *
+ * The language of a timing screen: PURPLE is the fastest anyone has gone
+ * through that sector, GREEN is the driver's own best, and everything else is
+ * plain. Purple beats green — whoever holds the session best necessarily
+ * holds their own, and the louder fact is the one worth showing.
+ *
+ * Comparison is `<=` rather than `===` because the bests are drawn from these
+ * very numbers: the holder of a best compares equal to it, and two drivers
+ * who tie to the millisecond both earned the colour.
+ */
+export const sectorTone = (t, sessionBest, ownBest) => {
+    if (t == null) return null;
+    if (sessionBest != null && t <= sessionBest) return 'purple';
+    if (ownBest != null && t <= ownBest) return 'green';
+    return 'plain';
+};
+
+/**
+ * How many laps are on a driver's current set of tyres.
+ *
+ * `life` is the count at the lap the stint STARTED — a set fitted used, as
+ * every set is after a first stint, does not start at zero — so the age now
+ * is that plus however far into the stint we are. Without it the tower said
+ * only which compound was fitted, which is half of a tyre's story: a
+ * twenty-lap-old medium and a fresh one are not the same tyre.
+ */
+export const tyreAge = (stint, lap) => {
+    if (!stint || stint.life == null || stint.from == null) return null;
+    return stint.life + Math.max(0, lap - stint.from);
 };
 
 // --- pit stops ------------------------------------------------------------

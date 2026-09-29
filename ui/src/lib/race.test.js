@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
     buildRace, frameAt, statusAt, orderByLap, lapCrossings, lapAt,
-    stintAt, pitsFor, messagesUpTo, weatherAt, gapsAtLap,
+    pitsFor, messagesUpTo, weatherAt, gapsAtLap,
     carAt, safetyCarAt, leaderAt, SC_TRANSIT_S, intervalsAt, gridSlots, standingsAt,
     aheadAt, strategyRows, namedStop, STOP_MAX_S, traceRows,
     lapTimeAt, bestLapUpTo, fastestLapUpTo, raceEvents, eventsAtLap,
     raceSummary, finalClassification, resultText,
+    sectorsAt, sectorBestsUpTo, sectorTone, tyreAge, stintAt,
 } from './race';
 
 /** A tiny but structurally real payload: 2 cars, 5 frames at 2 Hz. */
@@ -40,12 +41,21 @@ const payload = () => ({
         [3, '1', 1], [3, '16', 2],
     ],
     stints: {
-        '1': [{ compound: 'MEDIUM', from: 1, to: 2, fresh: true },
-              { compound: 'HARD', from: 3, to: 3, fresh: true }],
+        // `life` is the laps already on the set when the stint began — a used
+        // set out of qualifying does not start at zero, and the real payload
+        // always carries it.
+        '1': [{ compound: 'MEDIUM', from: 1, to: 2, fresh: true, life: 0 },
+              { compound: 'HARD', from: 3, to: 3, fresh: false, life: 5 }],
     },
     lap_times: {
         '1': [[1, 92.5], [2, 90.1], [3, 91.8]],
         '16': [[1, 93.0], [2, 89.4], [3, 90.6]],
+    },
+    // [lap, s1, s2, s3]. VER owns sector 1 outright; LEC owns 2 and 3 from
+    // lap 2 onward; lap 1 has no sector one, as a standing start never does.
+    sectors: {
+        '1': [[1, null, 31.0, 30.5], [2, 30.0, 30.6, 29.5], [3, 30.2, 30.8, 30.8]],
+        '16': [[1, null, 31.4, 30.9], [2, 30.4, 29.4, 29.6], [3, 30.6, 30.0, 30.0]],
     },
     pits: [
         { driver: '1', lap: 2, t: 1.0, window: 25.3, stopped: 4.1, red_flag: false, compound: 'HARD' },
@@ -1470,5 +1480,117 @@ describe('resultText', () => {
 
     it('survives a missing row', () => {
         expect(resultText(null, 0)).toBe('');
+    });
+});
+
+
+describe('sectorsAt', () => {
+    it('returns the three times for a lap', () => {
+        expect(sectorsAt(buildRace(payload()), '1', 2)).toEqual([30.0, 30.6, 29.5]);
+    });
+
+    it('keeps the sectors a lap DID set when one is missing', () => {
+        // Nobody sets a sector one on lap one — that lap starts on the grid.
+        // Dropping the whole row would throw away two real times.
+        expect(sectorsAt(buildRace(payload()), '1', 1)).toEqual([null, 31.0, 30.5]);
+    });
+
+    it('is null for a lap or a driver with nothing', () => {
+        const r = buildRace(payload());
+        expect(sectorsAt(r, '1', 99)).toBeNull();
+        expect(sectorsAt(r, '404', 1)).toBeNull();
+    });
+
+    it('finds a lap even when the rows skip one', () => {
+        const p = payload();
+        p.sectors['1'] = [[1, 30, 30, 30], [3, 29, 29, 29]];   // lap 2 missing
+        expect(sectorsAt(buildRace(p), '1', 3)).toEqual([29, 29, 29]);
+    });
+});
+
+describe('sectorBestsUpTo', () => {
+    it('finds the session best for each sector', () => {
+        const { session } = sectorBestsUpTo(buildRace(payload()), 3);
+        expect(session).toEqual([30.0, 29.4, 29.5]);
+    });
+
+    it('finds each driver their own', () => {
+        const { own } = sectorBestsUpTo(buildRace(payload()), 3);
+        expect(own.get('1')).toEqual([30.0, 30.6, 29.5]);
+        expect(own.get('16')).toEqual([30.4, 29.4, 29.6]);
+    });
+
+    it('DOES NOT KNOW ABOUT LAPS THAT HAVE NOT HAPPENED', () => {
+        // The rule the whole file keeps. A purple that already knows about
+        // lap 3 on lap 1 is showing the viewer the future.
+        const { session } = sectorBestsUpTo(buildRace(payload()), 1);
+        expect(session).toEqual([null, 31.0, 30.5]);
+    });
+
+    it('ignores the missing sectors rather than counting them as zero', () => {
+        const { session } = sectorBestsUpTo(buildRace(payload()), 1);
+        expect(session[0]).toBeNull();
+    });
+
+    it('is safe on a race carrying no sectors at all', () => {
+        const p = payload();
+        delete p.sectors;
+        const { session, own } = sectorBestsUpTo(buildRace(p), 3);
+        expect(session).toEqual([null, null, null]);
+        expect(own.size).toBe(0);
+    });
+});
+
+describe('sectorTone', () => {
+    it('paints the session best purple', () => {
+        expect(sectorTone(29.4, 29.4, 29.4)).toBe('purple');
+    });
+
+    it('paints a personal best green', () => {
+        expect(sectorTone(30.6, 29.4, 30.6)).toBe('green');
+    });
+
+    it('leaves everything else plain', () => {
+        expect(sectorTone(31.0, 29.4, 30.6)).toBe('plain');
+    });
+
+    it('lets purple beat green when a time is both', () => {
+        // Whoever holds the session best holds their own too; the louder fact
+        // is the one worth showing.
+        expect(sectorTone(29.4, 29.4, 29.4)).not.toBe('green');
+    });
+
+    it('gives two drivers tied to the millisecond the same colour', () => {
+        expect(sectorTone(29.4, 29.4, 29.9)).toBe('purple');
+    });
+
+    it('has no colour for a sector that was not set', () => {
+        expect(sectorTone(null, 29.4, 29.4)).toBeNull();
+    });
+});
+
+describe('tyreAge', () => {
+    it('counts on from the life the set already had', () => {
+        // A set fitted used — as every set is after a first stint — does not
+        // start at zero.
+        expect(tyreAge({ from: 10, life: 4 }, 10)).toBe(4);
+        expect(tyreAge({ from: 10, life: 4 }, 15)).toBe(9);
+    });
+
+    it('reads the age off a real stint', () => {
+        const r = buildRace(payload());
+        // A new set fitted on lap 1, one lap run since.
+        expect(tyreAge(stintAt(r, '1', 2), 2)).toBe(1);
+        // ...and a used set carries the laps it already had.
+        expect(tyreAge(stintAt(r, '1', 3), 3)).toBe(5);
+    });
+
+    it('does not run backwards before the stint began', () => {
+        expect(tyreAge({ from: 10, life: 4 }, 3)).toBe(4);
+    });
+
+    it('is null when the payload never said', () => {
+        expect(tyreAge(null, 5)).toBeNull();
+        expect(tyreAge({ from: 1, life: null }, 5)).toBeNull();
     });
 });

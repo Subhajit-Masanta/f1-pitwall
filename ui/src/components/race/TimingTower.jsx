@@ -15,6 +15,7 @@ import { F1, MONO } from '../../theme';
 import {
     standingsAt, aheadAt, stintAt, namedStop,
     lapTimeAt, bestLapUpTo, fastestLapUpTo,
+    sectorsAt, sectorBestsUpTo, sectorTone, tyreAge,
 } from '../../lib/race';
 import TyreMark from './TyreMark';
 
@@ -43,12 +44,47 @@ const fmtGap = (g) => (g == null ? '—' : `+${g.toFixed(2)}`);
  * questions — "who is winning" against "is there a fight here" — and a tower
  * this narrow has room for one column at a time.
  */
+// SHORT LABELS, because six of these have to fit a column 196px wide and
+// `LEADER` plus `INTERVAL` alone spend eighty of it. GAP and INT are what a
+// real timing screen calls these two anyway, so the tower reads more like one
+// rather than less.
 const COLUMNS = [
-    ['leader', 'LEADER'],
-    ['ahead', 'INTERVAL'],
+    ['leader', 'GAP'],
+    ['ahead', 'INT'],
     ['last', 'LAST'],
     ['best', 'BEST'],
+    ['sectors', 'SEC'],
 ];
+
+/**
+ * The three sector bars, in the language of a timing screen.
+ *
+ * Purple is the fastest anyone has gone through that sector, green is the
+ * driver's own best, and a sector nobody set is an empty slot rather than a
+ * missing one — lap one has no sector one, so a row of two bars and a gap is
+ * the truth about a standing start.
+ *
+ * Bars rather than numbers because three lap-time-shaped numbers do not fit a
+ * tower this narrow, and because the colour IS the information: you read a
+ * timing screen's sectors by where the purple is, not by the digits.
+ */
+const TONE = { purple: F1.purple, green: F1.drs, plain: F1.dim };
+
+const Sectors = ({ times, session, own }) => (
+    <span style={{
+        marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center',
+    }}>
+        {[0, 1, 2].map((i) => {
+            const tone = times ? sectorTone(times[i], session[i], own?.[i]) : null;
+            return (
+                <span key={i} style={{
+                    width: 12, height: 4,
+                    background: tone ? TONE[tone] : 'rgba(255,255,255,0.12)',
+                }} />
+            );
+        })}
+    </span>
+);
 
 /**
  * The relative column, which only exists while a driver is being followed.
@@ -146,6 +182,13 @@ const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }
     const done = lap - 1;
     const purple = React.useMemo(() => fastestLapUpTo(race, lap - 1), [race, lap]);
 
+    // Both halves of the sector colouring from one pass, and only when the
+    // column asking for it is on screen.
+    const bests = React.useMemo(
+        () => (column === 'sectors' ? sectorBestsUpTo(race, done) : null),
+        [race, done, column],
+    );
+
     // Retired cars keep their classification but drop to the bottom.
     const order = React.useMemo(
         () => [...live.filter((n) => !retired.has(n)),
@@ -198,12 +241,20 @@ const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }
             {/* Which gap the numbers are. Unlabelled, a column of seconds is
                 ambiguous — +9.0 to the leader and +9.0 to the car ahead are
                 very different races. */}
+            {/* NO LABEL IN FRONT OF THESE ANY MORE. It said "GAP TO", which
+                was true of two of the four columns and is now true of two of
+                six — LAST, BEST and SEC are not gaps. Dropping it also buys
+                back the thirty-odd pixels that a sixth button needs in a
+                column this narrow. The buttons name themselves.
+
+                It wraps rather than clips: six of them plus REL is the widest
+                this can get, and a second line costs twelve pixels of tower
+                where an overflow costs a button. */}
             <div style={{
-                display: 'flex', alignItems: 'center', gap: 4,
+                display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
                 padding: narrow ? '0 5px 3px' : '0 7px 4px',
                 fontSize: 8, fontWeight: 800, letterSpacing: 1,
             }}>
-                <span style={{ flex: 1, color: F1.faint }}>GAP TO</span>
                 {(focus ? [REL, ...COLUMNS] : COLUMNS).map(([id, label]) => (
                     <button
                         key={id}
@@ -211,7 +262,12 @@ const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }
                         onClick={() => setColumn(id)}
                         style={{
                             border: 'none', cursor: 'pointer',
-                            padding: '2px 5px', fontFamily: MONO,
+                            // 3px, not 5. Measured: with REL added the six
+                            // buttons needed 196px of a 182px row, wrapped SEC
+                            // onto a line of its own, and pushed row twenty
+                            // eleven pixels into the transport. Two pixels a
+                            // side is the 24 that puts them back on one line.
+                            padding: '2px 3px', fontFamily: MONO,
                             fontSize: 8, fontWeight: 800, letterSpacing: 1,
                             background: column === id ? F1.dim : 'transparent',
                             color: column === id ? F1.bg : F1.faint,
@@ -265,6 +321,21 @@ const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }
                                 : undefined}
                         >{car.code}</span>
                         <Tyre compound={stint?.compound} />
+                        {/* HOW OLD THE TYRE IS. The compound alone is half of
+                            a tyre's story — a twenty-lap-old medium and a
+                            fresh one are not the same tyre, and which of the
+                            two a driver is on is most of why they are where
+                            they are. */}
+                        {/* F1.dim, not F1.faint. Faint is for decoration, and
+                            measured on the stage it came out at 2.3:1 against
+                            the 4.5:1 that small text needs to be read — the
+                            digits were there and nobody could see them. Dim is
+                            what the position numbers use, at 6.2:1. */}
+                        <span style={{
+                            width: 14, textAlign: 'right', color: F1.dim,
+                            fontVariantNumeric: 'tabular-nums',
+                            fontSize: narrow ? 8.5 : 9.5, flex: '0 0 auto',
+                        }}>{tyreAge(stint, lap) ?? ''}</span>
                         {pitting.has(num) && (
                             <span style={{
                                 padding: '1px 4px', fontSize: 8, fontWeight: 800,
@@ -274,13 +345,21 @@ const TimingTower = ({ race, lap, second, status, narrow, focus = null, onPick }
                                 {pitBadge(pitting.get(num))}
                             </span>
                         )}
-                        <span style={{
-                            flex: 1, textAlign: 'right',
-                            color: isPurple(num) && column !== 'leader' && column !== 'ahead'
-                                ? F1.purple : i === 0 ? F1.text : F1.dim,
-                            fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
-                            fontSize: narrow ? 9 : 10,
-                        }}>{cell(num, i)}</span>
+                        {column === 'sectors' ? (
+                            <Sectors
+                                times={out.has(num) ? null : sectorsAt(race, num, done)}
+                                session={bests.session}
+                                own={bests.own.get(num)}
+                            />
+                        ) : (
+                            <span style={{
+                                flex: 1, textAlign: 'right',
+                                color: isPurple(num) && column !== 'leader' && column !== 'ahead'
+                                    ? F1.purple : i === 0 ? F1.text : F1.dim,
+                                fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
+                                fontSize: narrow ? 9 : 10,
+                            }}>{cell(num, i)}</span>
+                        )}
                     </button>
                 );
             })}
